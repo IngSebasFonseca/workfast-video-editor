@@ -5,6 +5,7 @@ import uuid
 import base64
 import json
 import os
+import re
 import socket
 import subprocess
 from datetime import datetime
@@ -42,6 +43,12 @@ YOUTUBE_COOKIE_BROWSERS = {
     "brave": "brave",
 }
 YOUTUBE_AUTO_COOKIE_SEQUENCE = [None, "file"]
+YOUTUBE_DOWNLOAD_FORMATS = [
+    "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]/best",
+    "bv*+ba/b",
+    "best",
+    None,
+]
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -166,6 +173,7 @@ def youtube_cookie_attempts(cookie_browser: str) -> list[str | None]:
 
 def youtube_options(base_options: dict, browser: str | None) -> dict:
     options = dict(base_options)
+    options.setdefault("js_runtimes", {"node": {}})
     if browser == "file":
         if not YOUTUBE_COOKIES_FILE.exists():
             raise FileNotFoundError("No hay cookies.txt guardado. Sube el archivo en la seccion YouTube.")
@@ -188,7 +196,7 @@ def youtube_browser_label(browser: str | None) -> str:
 
 
 def youtube_error_message(error: Exception, attempted: list[str | None]) -> str:
-    raw = str(error)
+    raw = clean_error_text(str(error))
     tried = ", ".join(youtube_browser_label(browser) for browser in attempted)
     if "not a bot" in raw or "Sign in to confirm" in raw:
         return (
@@ -209,6 +217,10 @@ def youtube_error_message(error: Exception, attempted: list[str | None]) -> str:
             f"Intentos realizados: {tried}."
         )
     return f"No pude leer YouTube ({tried}): {raw}"
+
+
+def clean_error_text(message: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", message or "").strip()
 
 
 def find_chrome_executable() -> str | None:
@@ -506,6 +518,7 @@ def list_youtube_videos():
     base_options = {
         "extract_flat": "in_playlist",
         "quiet": True,
+        "noprogress": True,
         "no_warnings": True,
         "ignoreerrors": True,
     }
@@ -635,10 +648,10 @@ def import_youtube_video():
             set_job(job_id, status="processing", progress=1, step="Conectando con YouTube")
             output_template = str(UPLOAD_FOLDER / f"youtube_{job_id}_%(title).80s.%(ext)s")
             base_options = {
-                "format": "bv*[height<=1080]+ba/b[height<=1080]/best",
                 "merge_output_format": "mp4",
                 "outtmpl": output_template,
                 "quiet": True,
+                "noprogress": True,
                 "no_warnings": True,
                 "noplaylist": True,
                 "progress_hooks": [download_hook],
@@ -651,22 +664,30 @@ def import_youtube_video():
 
             for browser in youtube_cookie_attempts(cookie_browser):
                 attempted.append(browser)
-                set_job(
-                    job_id,
-                    status="processing",
-                    progress=2,
-                    step=f"Conectando con YouTube ({youtube_browser_label(browser)})",
-                )
-                try:
-                    with YoutubeDL(youtube_options(base_options, browser)) as ydl:
-                        info = ydl.extract_info(url, download=True) or {}
-                        downloaded = Path(ydl.prepare_filename(info))
-                        if downloaded.suffix.lower() != ".mp4":
-                            downloaded = downloaded.with_suffix(".mp4")
+                for format_spec in YOUTUBE_DOWNLOAD_FORMATS:
+                    set_job(
+                        job_id,
+                        status="processing",
+                        progress=2,
+                        step="Conectando con YouTube",
+                    )
+                    try:
+                        options = dict(base_options)
+                        if format_spec:
+                            options["format"] = format_spec
+                        with YoutubeDL(youtube_options(options, browser)) as ydl:
+                            info = ydl.extract_info(url, download=True) or {}
+                            downloaded = Path(ydl.prepare_filename(info))
+                            if downloaded.suffix.lower() != ".mp4":
+                                downloaded = downloaded.with_suffix(".mp4")
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        if "Requested format is not available" in str(exc):
+                            continue
+                        break
+                if info is not None and downloaded is not None:
                     break
-                except Exception as exc:
-                    last_error = exc
-                    continue
 
             if info is None or downloaded is None:
                 raise RuntimeError(youtube_error_message(last_error or RuntimeError("YouTube no respondio."), attempted))
@@ -697,7 +718,7 @@ def import_youtube_video():
                 title=info.get("title") or title_from_filename(final_path.name),
             )
         except Exception as exc:
-            set_job(job_id, status="error", progress=0, step="Error", error=str(exc))
+            set_job(job_id, status="error", progress=0, step="Error", error=clean_error_text(str(exc)))
 
     threading.Thread(target=worker, daemon=True).start()
     return jsonify({"success": True, "job_id": job_id})

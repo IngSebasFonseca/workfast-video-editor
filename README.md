@@ -26,6 +26,7 @@ App local para automatizar un preset de edicion estilo CapCut/Filmora para video
 - Windows 10/11.
 - Python 3.10 o superior.
 - FFmpeg y ffprobe disponibles en PATH.
+- Node.js 20 o superior para resolver los retos JavaScript actuales de YouTube.
 
 Para comprobar FFmpeg:
 

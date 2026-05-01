@@ -498,30 +498,15 @@
                         <button class="mini-btn" id="youtubeLoadBtn">Cargar</button>
                     </div>
                 </div>
-                <div class="field">
-                    <label for="youtubeCookieBrowser">Sesion YouTube</label>
-                    <select class="control-select" id="youtubeCookieBrowser">
-                        <option value="auto">Auto: sin sesion + cookies.txt</option>
-                        <option value="file">Usar cookies.txt</option>
-                        <option value="edge">Leer Microsoft Edge</option>
-                        <option value="chrome">Leer Google Chrome</option>
-                        <option value="firefox">Leer Firefox</option>
-                        <option value="brave">Leer Brave</option>
-                        <option value="none">Sin sesion</option>
-                    </select>
-                </div>
+                <input class="hidden" id="youtubeCookieBrowser" type="hidden" value="auto">
                 <div class="youtube-cookie-row">
-                    <button class="mini-btn secondary" id="youtubeLoginBtn">Abrir login</button>
-                    <button class="mini-btn secondary" id="youtubeCaptureBtn">Guardar sesion</button>
-                </div>
-                <div class="youtube-cookie-row">
-                    <button class="mini-btn secondary" id="youtubeCookiesBtn">Subir cookies</button>
-                    <button class="mini-btn secondary" id="youtubeSessionTestBtn">Probar</button>
+                    <button class="mini-btn secondary" id="youtubeLoginBtn">Conectar YouTube</button>
+                    <button class="mini-btn secondary" id="youtubeCaptureBtn">Guardar acceso</button>
                 </div>
                 <div class="mini-status" id="youtubeCookiesStatus">Sin sesion guardada</div>
                 <div style="height: 8px"></div>
                 <input class="hidden" id="youtubeCookiesInput" type="file" accept=".txt,text/plain">
-                <div class="alert" id="youtubeStatus">Pulsa Abrir login, entra a YouTube en esa ventana y luego pulsa Guardar sesion.</div>
+                <div class="alert" id="youtubeStatus">Conecta YouTube una vez si la importacion pide verificar tu cuenta.</div>
                 <div style="height: 10px"></div>
                 <div class="youtube-list" id="youtubeList"></div>
             </div>
@@ -690,10 +675,6 @@
         document.getElementById("youtubeLoadBtn").addEventListener("click", loadYoutubeVideos);
         document.getElementById("youtubeLoginBtn").addEventListener("click", openYoutubeLoginBrowser);
         document.getElementById("youtubeCaptureBtn").addEventListener("click", captureYoutubeSession);
-        document.getElementById("youtubeCookiesBtn").addEventListener("click", () => {
-            document.getElementById("youtubeCookiesInput").click();
-        });
-        document.getElementById("youtubeSessionTestBtn").addEventListener("click", testYoutubeSession);
         document.getElementById("youtubeCookiesInput").addEventListener("change", uploadYoutubeCookies);
 
         Object.entries(assetSelects).forEach(([type, select]) => {
@@ -867,7 +848,7 @@
                 const response = await fetch(`${API_BASE}/youtube/login-browser`, { method: "POST" });
                 const data = await response.json();
                 if (!response.ok || !data.success) throw new Error(data.error || "No pude abrir Chrome");
-                setYoutubeStatus("Inicia sesion en YouTube en la ventana que se abrio. Luego pulsa Guardar sesion.", "success");
+                setYoutubeStatus("Inicia sesion en YouTube en la ventana que se abrio. Luego pulsa Guardar acceso.", "success");
             } catch (error) {
                 setYoutubeStatus(error.message, "error");
             } finally {
@@ -885,7 +866,7 @@
                 if (!response.ok || !data.success) throw new Error(data.error || "No pude guardar la sesion");
                 document.getElementById("youtubeCookieBrowser").value = "file";
                 document.getElementById("youtubeCookiesStatus").textContent = `Sesion guardada (${data.cookie_count || 0} cookies)`;
-                setYoutubeStatus("Sesion guardada. Ya puedes cargar o importar videos con Usar cookies.txt.", "success");
+                setYoutubeStatus("Acceso guardado. Ya puedes cargar e importar videos.", "success");
             } catch (error) {
                 setYoutubeStatus(error.message, "error");
                 await loadYoutubeCookiesStatus();
@@ -914,33 +895,6 @@
                 await loadYoutubeCookiesStatus();
             } finally {
                 input.value = "";
-            }
-        }
-
-        async function testYoutubeSession() {
-            const url = document.getElementById("youtubeUrlInput").value.trim();
-            if (!url) {
-                setYoutubeStatus("Pega un link de YouTube para probar esa sesion.", "error");
-                return;
-            }
-
-            const button = document.getElementById("youtubeSessionTestBtn");
-            button.disabled = true;
-            setYoutubeStatus(`Probando sesion: ${getYoutubeSessionLabel()}...`);
-
-            try {
-                const response = await fetch(`${API_BASE}/youtube/list`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ url, cookie_browser: getYoutubeCookieBrowser() })
-                });
-                const data = await response.json();
-                if (!response.ok || !data.success) throw new Error(data.error || "No pude probar esa sesion");
-                setYoutubeStatus(`Sesion OK: ${data.count || 0} videos visibles con ${getYoutubeSessionLabel()}.`, "success");
-            } catch (error) {
-                setYoutubeStatus(error.message, "error");
-            } finally {
-                button.disabled = false;
             }
         }
 
@@ -1137,11 +1091,6 @@
 
         function getYoutubeCookieBrowser() {
             return document.getElementById("youtubeCookieBrowser").value || "auto";
-        }
-
-        function getYoutubeSessionLabel() {
-            const select = document.getElementById("youtubeCookieBrowser");
-            return select.options[select.selectedIndex].textContent;
         }
 
         function formatSize(bytes) {
