@@ -1,57 +1,66 @@
 @echo off
-title WorkFast Video Editor - Setup
+setlocal
+title WorkFast Video Editor
+
+cd /d "%~dp0"
 
 echo.
-echo ╔════════════════════════════════════════════╗
-echo ║   WorkFast Video Editor - Setup Script    ║
-echo ╚════════════════════════════════════════════╝
+echo WorkFast Video Editor
+echo =====================
 echo.
 
-REM Verificar si Python está instalado
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ❌ Python no está instalado o no está en PATH
-    echo Por favor instala Python desde: https://www.python.org
+where python >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: Python no esta instalado o no esta en PATH.
     pause
     exit /b 1
 )
 
-echo ✅ Python detectado
-
-REM Verificar si FFmpeg está instalado
-ffmpeg -version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ⚠️  FFmpeg no está en PATH
-    echo Instalando FFmpeg a través de pip...
-    echo.
+where ffmpeg >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: FFmpeg no esta instalado o no esta en PATH.
+    echo Instala FFmpeg y vuelve a ejecutar este archivo.
+    pause
+    exit /b 1
 )
 
-REM Crear virtual environment si no existe
-if not exist venv (
-    echo 📦 Creando entorno virtual...
+where ffprobe >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: ffprobe no esta instalado o no esta en PATH.
+    pause
+    exit /b 1
+)
+
+if not exist "venv\Scripts\python.exe" (
+    echo Creando entorno virtual...
     python -m venv venv
-    call venv\Scripts\activate.bat
-    echo ✅ Entorno virtual creado
-) else (
-    echo ✅ Entorno virtual detectado
-    call venv\Scripts\activate.bat
+    if errorlevel 1 (
+        echo ERROR: No se pudo crear el entorno virtual.
+        pause
+        exit /b 1
+    )
+)
+
+call "venv\Scripts\activate.bat"
+
+echo Instalando dependencias...
+python -m pip install --upgrade pip setuptools wheel
+if errorlevel 1 (
+    echo ERROR: No se pudo actualizar pip.
+    pause
+    exit /b 1
+)
+
+python -m pip install -r requirements.txt
+if errorlevel 1 (
+    echo ERROR: No se pudieron instalar las dependencias.
+    pause
+    exit /b 1
 )
 
 echo.
-echo 📥 Instalando dependencias...
-pip install -r requirements.txt --quiet
-
-echo.
-echo.
-echo ╔════════════════════════════════════════════╗
-echo ║          ✅ SETUP COMPLETADO              ║
-echo ╚════════════════════════════════════════════╝
-echo.
-echo 🚀 Iniciando servidor...
-echo    Accede a: http://localhost:5000
-echo.
-echo Presiona Ctrl+C para detener el servidor
+echo Servidor iniciado en http://localhost:5000
+echo Presiona Ctrl+C para detenerlo.
 echo.
 
-cd backend
-python main.py
+python backend\main.py

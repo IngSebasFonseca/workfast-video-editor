@@ -1,267 +1,454 @@
-import cv2
-import numpy as np
-import os
-from PIL import Image
-import librosa
-import soundfile as sf
-from scipy import signal
-import subprocess
-import logging
-from pathlib import Path
-import tempfile
-import shutil
+from __future__ import annotations
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger(__name__)
+import json
+import math
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Callable
+
+
+ProgressCallback = Callable[[int, str], None]
 
 
 class VideoEditor:
-    """Editor profesional de video para TikTok/Redes Sociales"""
-    
-    def __init__(self, input_video, logo_path=None, ending_path=None, 
-                 follow_image_path=None, output_path="output.mp4"):
-        self.input_video = input_video
-        self.logo_path = logo_path
-        self.ending_path = ending_path
-        self.follow_image_path = follow_image_path
-        self.output_path = output_path
-        self.temp_dir = tempfile.mkdtemp(prefix="workfast_")
-        
-        if not os.path.exists(input_video):
-            raise FileNotFoundError(f"❌ Video no encontrado: {input_video}")
-        
-        self.fps, self.duration, self.width, self.height = self._get_video_info(input_video)
-        logger.info(f"✓ Video detectado: {self.width}x{self.height} @ {self.fps}fps")
-    
-    def _get_video_info(self, video_path):
-        """Obtener info del video con ffprobe o fallback a OpenCV"""
+    """FFmpeg-based renderer for the WorkFast TikTok editing preset."""
+
+    WIDTH = 1080
+    HEIGHT = 1920
+    FPS = 30
+
+    def __init__(
+        self,
+        input_video: str | Path,
+        output_path: str | Path,
+        logo_path: str | Path | None = None,
+        ending_path: str | Path | None = None,
+        follow_image_path: str | Path | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> None:
+        self.input_video = Path(input_video).resolve()
+        self.output_path = Path(output_path).resolve()
+        self.logo_path = Path(logo_path).resolve() if logo_path else None
+        self.ending_path = Path(ending_path).resolve() if ending_path else None
+        self.follow_image_path = Path(follow_image_path).resolve() if follow_image_path else None
+        self.progress_callback = progress_callback
+        temp_root = self.output_path.parent / ".workfast_tmp"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        self.temp_dir = temp_root / f"job_{self.output_path.stem}"
+        if self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+        if not self.input_video.exists():
+            raise FileNotFoundError(f"Video no encontrado: {self.input_video}")
+
+        self.video_info = self._probe(self.input_video)
+        self.duration = float(self.video_info.get("duration") or 0)
+        self.has_audio = self._has_audio(self.video_info)
+        if self.duration <= 0:
+            raise RuntimeError("No pude detectar la duracion del video.")
+
+    def process_complete(
+        self,
+        title_text: str = "Mi Video",
+        speed: float = 1.05,
+        zoom_bottom: float = 1.96,
+        zoom_top: float = 0.96,
+        saturation: float = 100,
+        volume_db: float = 5.4,
+        filter_intensity: float = 0.24,
+        title_interval: float = 10,
+    ) -> Path:
+        """Render the complete preset and return the final MP4 path."""
+        self._ensure_tools()
+        speed = self._clamp(speed, 0.5, 2.0)
+        zoom_bottom = self._clamp(zoom_bottom, 1.0, 3.0)
+        zoom_top = self._clamp(zoom_top, 0.5, 1.5)
+        filter_intensity = self._clamp(filter_intensity, 0.0, 1.0)
+        title_interval = self._clamp(title_interval, 3.0, 60.0)
+
         try:
-            # Intentar ffprobe
-            cmd = [
-                'ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                '-show_entries', 'stream=width,height,r_frame_rate',
-                '-of', 'default=noprint_wrappers=1:nokey=1',
-                video_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
-            
-            if len(lines) >= 3:
-                w, h = int(lines[0]), int(lines[1])
-                fps = float(lines[2].split('/')[0]) if '/' in lines[2] else float(lines[2])
-            else:
-                raise ValueError("Parseo fallido")
-            
-            # Duración
-            dur_cmd = [
-                'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-                '-of', 'default=noprint_wrappers=1:nokey=1', video_path
-            ]
-            dur_result = subprocess.run(dur_cmd, capture_output=True, text=True, timeout=10)
-            duration = float(dur_result.stdout.strip())
-            return fps, duration, w, h
-            
-        except Exception as e:
-            logger.warning(f"ffprobe falló: {e}, usando OpenCV...")
-            return self._get_video_info_cv2(video_path)
-    
-    def _get_video_info_cv2(self, video_path):
-        """Fallback a OpenCV"""
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise RuntimeError(f"No se puede abrir: {video_path}")
-        
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1080
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1920
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = frame_count / fps if fps > 0 else 10
-        cap.release()
-        return fps, duration, w, h
-    
-    def process_complete(self, title_text="Mi Video", speed=1.05, zoom_bottom=1.96, 
-                        zoom_top=0.96, saturation=100, volume_db=5.4, 
-                        filter_intensity=0.24, title_interval=10):
-        """Procesar video COMPLETO con TODAS las ediciones"""
-        try:
-            logger.info("\n" + "="*60)
-            logger.info("⚡ INICIANDO PROCESAMIENTO")
-            logger.info("="*60)
-            
-            # 1. Extraer audio
-            logger.info("📊 [1/5] Extrayendo audio...")
-            audio_path = self._extract_audio(self.input_video)
-            
-            # 2. Procesar audio
-            logger.info(f"🔊 [2/5] Procesando audio (+{volume_db}dB, denoise)...")
-            processed_audio = self._process_audio(audio_path, volume_db=volume_db)
-            
-            # 3. Procesar video con efectos
-            logger.info(f"🎬 [3/5] Procesando video (velocidad {speed}x, zoom, filtros)...")
-            video_with_effects = self._create_effects_video(
-                speed=speed, zoom_bottom=zoom_bottom, zoom_top=zoom_top,
-                saturation=saturation, filter_intensity=filter_intensity
+            self._progress(5, "Preparando render FFmpeg")
+            main_video = self.temp_dir / "main.mp4"
+            self._render_main_video(
+                output_path=main_video,
+                title_text=title_text,
+                speed=speed,
+                zoom_bottom=zoom_bottom,
+                zoom_top=zoom_top,
+                saturation=saturation,
+                volume_db=volume_db,
+                filter_intensity=filter_intensity,
+                title_interval=title_interval,
             )
-            
-            # 4. Combinar video con audio
-            logger.info("🔗 [4/5] Combinando video + audio...")
-            video_with_audio = self._combine_video_audio(video_with_effects, processed_audio)
-            
-            # 5. Agregar ending si existe
-            if self.ending_path and os.path.exists(self.ending_path):
-                logger.info("🎞️  [5/5] Agregando ending...")
-                final_video = self._add_ending(video_with_audio)
+
+            if self.ending_path and self.ending_path.exists():
+                self._progress(88, "Normalizando ending")
+                final_video = self._append_ending(main_video)
             else:
-                final_video = video_with_audio
-            
-            # Mover a destino final
-            shutil.move(final_video, self.output_path)
-            
-            logger.info("="*60)
-            logger.info(f"✅ PROCESAMIENTO COMPLETADO")
-            logger.info(f"📁 Archivo: {self.output_path}")
-            logger.info("="*60 + "\n")
-            
+                final_video = main_video
+
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            if self.output_path.exists():
+                self.output_path.unlink()
+            shutil.move(str(final_video), str(self.output_path))
+            self._progress(100, "Video listo")
             return self.output_path
-            
-        except Exception as e:
-            logger.error(f"\n❌ ERROR: {e}\n", exc_info=False)
-            raise
         finally:
-            self._cleanup()
-    
-    def _extract_audio(self, video_path):
-        """Extraer audio a WAV"""
-        audio_path = os.path.join(self.temp_dir, "audio.wav")
-        cmd = ['ffmpeg', '-i', video_path, '-q:a', '9', '-vn', '-y', audio_path]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"Error extrayendo audio: {result.stderr}")
-        return audio_path
-    
-    def _process_audio(self, audio_path, volume_db=5.4):
-        """Procesar audio: amplificar, denoise"""
-        try:
-            audio, sr = librosa.load(audio_path, sr=None)
-            
-            # Amplificar
-            gain = 10 ** (volume_db / 20)
-            audio = audio * gain
-            
-            # Normalizar
-            max_val = np.max(np.abs(audio))
-            if max_val > 1.0:
-                audio = audio / max_val
-            
-            # Denoise
-            audio = self._denoise_audio(audio, sr)
-            
-            output = os.path.join(self.temp_dir, "audio_processed.wav")
-            sf.write(output, audio, sr)
-            return output
-        except Exception as e:
-            logger.warning(f"Error en procesamiento de audio: {e}, usando original")
-            return audio_path
-    
-    def _denoise_audio(self, audio, sr):
-        """Denoise básico"""
-        try:
-            D = librosa.stft(audio, n_fft=2048)
-            mag = np.abs(D)
-            threshold = np.mean(mag) * 0.5
-            D *= (mag > threshold)
-            return librosa.istft(D)
-        except:
-            return audio
-    
-    def _create_effects_video(self, speed=1.05, zoom_bottom=1.96, zoom_top=0.96,
-                             saturation=100, filter_intensity=0.24):
-        """Procesar video con efectos usando ffmpeg"""
-        output = os.path.join(self.temp_dir, "video_effects.mp4")
-        
-        filters = self._build_filter_chain(
-            speed=speed, zoom_bottom=zoom_bottom, zoom_top=zoom_top,
-            saturation=saturation, filter_intensity=filter_intensity
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _render_main_video(
+        self,
+        output_path: Path,
+        title_text: str,
+        speed: float,
+        zoom_bottom: float,
+        zoom_top: float,
+        saturation: float,
+        volume_db: float,
+        filter_intensity: float,
+        title_interval: float,
+    ) -> None:
+        inputs = ["-i", str(self.input_video)]
+        next_input_index = 1
+        audio_index = 0
+        logo_index = None
+        follow_index = None
+
+        if not self.has_audio:
+            audio_index = next_input_index
+            next_input_index += 1
+            inputs.extend(
+                [
+                    "-f",
+                    "lavfi",
+                    "-t",
+                    f"{self.duration:.3f}",
+                    "-i",
+                    "anullsrc=channel_layout=stereo:sample_rate=48000",
+                ]
+            )
+
+        if self.logo_path and self.logo_path.exists():
+            logo_index = next_input_index
+            next_input_index += 1
+            inputs.extend(["-loop", "1", "-i", str(self.logo_path)])
+
+        if self.follow_image_path and self.follow_image_path.exists():
+            follow_index = next_input_index
+            next_input_index += 1
+            inputs.extend(["-loop", "1", "-i", str(self.follow_image_path)])
+
+        filter_complex = self._build_filter_complex(
+            title_text=title_text,
+            speed=speed,
+            zoom_bottom=zoom_bottom,
+            zoom_top=zoom_top,
+            saturation=saturation,
+            volume_db=volume_db,
+            filter_intensity=filter_intensity,
+            title_interval=title_interval,
+            audio_index=audio_index,
+            logo_index=logo_index,
+            follow_index=follow_index,
         )
-        
-        cmd = [
-            'ffmpeg', '-i', self.input_video,
-            '-vf', filters,
-            '-c:v', 'libx264', '-preset', 'faster', '-crf', '22',
-            '-an', '-y', output
+
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-y",
+            *inputs,
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[vout]",
+            "-map",
+            "[aout]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            "-shortest",
+            "-progress",
+            "pipe:1",
+            "-nostats",
+            str(output_path),
         ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"Error procesando video: {result.stderr}")
-        return output
-    
-    def _build_filter_chain(self, speed=1.05, zoom_bottom=1.96, zoom_top=0.96,
-                           saturation=100, filter_intensity=0.24):
-        """Construir filtros ffmpeg"""
-        filters = []
-        
-        # 1. Escalar a 9:16 (1080x1920)
-        filters.append("scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2")
-        
-        # 2. Velocidad
-        filters.append(f"setpts=PTS/{speed}")
-        
-        # 3. Zoom simulado (escalar + padding)
-        zoom_w = int(1080 * zoom_top)
-        zoom_h = int(1920 * zoom_top)
-        filters.append(f"scale={zoom_w}:{zoom_h},pad=1080:1920:(1080-{zoom_w})/2:(1920-{zoom_h})/2")
-        
-        # 4. Mejorar calidad (saturación + contraste)
-        sat_val = 1 + (saturation - 100) * 0.01
-        filters.append(f"eq=contrast=1.{int(filter_intensity*10)}:saturation={sat_val:.2f}")
-        
-        return ','.join(filters)
-    
-    def _combine_video_audio(self, video_path, audio_path):
-        """Combinar video sin audio con audio procesado"""
-        output = os.path.join(self.temp_dir, "video_audio.mp4")
-        
-        cmd = [
-            'ffmpeg', '-i', video_path, '-i', audio_path,
-            '-c:v', 'copy', '-c:a', 'aac',
-            '-map', '0:v:0', '-map', '1:a:0', '-shortest',
-            '-y', output
+
+        target_duration = self.duration / speed
+        self._run_ffmpeg(command, target_duration=target_duration, start=8, end=86)
+
+    def _build_filter_complex(
+        self,
+        title_text: str,
+        speed: float,
+        zoom_bottom: float,
+        zoom_top: float,
+        saturation: float,
+        volume_db: float,
+        filter_intensity: float,
+        title_interval: float,
+        audio_index: int,
+        logo_index: int | None,
+        follow_index: int | None,
+    ) -> str:
+        bottom_scale_w = self._even(math.ceil(self.WIDTH * zoom_bottom))
+        bottom_scale_h = self._even(math.ceil(self.HEIGHT * zoom_bottom))
+        top_scale_w = self._even(math.ceil(self.WIDTH * zoom_top))
+        top_scale_h = self._even(math.ceil(self.HEIGHT * zoom_top))
+        bottom_saturation = 1.0 + self._clamp(saturation, 0.0, 100.0) / 100.0
+        contrast = 1.0 + (filter_intensity * 0.35)
+        sharpen = 0.25 + (filter_intensity * 0.75)
+        title = self._escape_drawtext(title_text.strip() or "Mi Video")
+        interval = f"{title_interval:.2f}"
+        output_duration = max(self.duration / speed, 1.0)
+
+        parts = [
+            (
+                f"[0:v]fps={self.FPS},scale={self.WIDTH}:{self.HEIGHT}:"
+                "force_original_aspect_ratio=increase,"
+                f"crop={self.WIDTH}:{self.HEIGHT},split=2[bottom_src][top_src]"
+            ),
+            (
+                f"[bottom_src]hflip,scale={bottom_scale_w}:{bottom_scale_h},"
+                f"crop={self.WIDTH}:{self.HEIGHT},"
+                f"eq=saturation={bottom_saturation:.2f}:contrast=1.08:brightness=0.04,"
+                "gblur=sigma=5,format=rgba,colorchannelmixer=aa=0.78[bottom]"
+            ),
+            (
+                f"[top_src]scale={self.WIDTH}:{self.HEIGHT}:force_original_aspect_ratio=decrease,"
+                f"pad={self.WIDTH}:{self.HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+                f"scale={top_scale_w}:{top_scale_h},"
+                f"pad={self.WIDTH}:{self.HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+                f"eq=contrast={contrast:.2f}:saturation=1.08:brightness=0.01,"
+                f"unsharp=5:5:{sharpen:.2f}:3:3:0.20,format=rgba[top]"
+            ),
+            "[bottom][top]overlay=(W-w)/2:(H-h)/2:format=auto[stage0]",
         ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"Error combinando: {result.stderr}")
-        return output
-    
-    def _add_ending(self, video_path):
-        """Agregar video de ending"""
-        if not os.path.exists(self.ending_path):
-            return video_path
-        
-        output = os.path.join(self.temp_dir, "video_ending.mp4")
-        concat_file = os.path.join(self.temp_dir, "concat.txt")
-        
-        with open(concat_file, 'w') as f:
-            f.write(f"file '{video_path}'\n")
-            f.write(f"file '{self.ending_path}'\n")
-        
-        cmd = [
-            'ffmpeg', '-f', 'concat', '-safe', '0',
-            '-i', concat_file, '-c', 'copy',
-            '-y', output
+
+        stage = "stage0"
+        stage_count = 1
+
+        if logo_index is not None:
+            parts.append(
+                f"[{logo_index}:v]scale=190:-1,format=rgba,"
+                "colorchannelmixer=aa=0.24[logo]"
+            )
+            next_stage = f"stage{stage_count}"
+            stage_count += 1
+            parts.append(
+                f"[{stage}][logo]overlay="
+                f"x='(W-w)*t/{output_duration:.3f}':y=72:format=auto:shortest=1[{next_stage}]"
+            )
+            stage = next_stage
+
+        if follow_index is not None:
+            parts.append(
+                f"[{follow_index}:v]scale=320:-1,format=rgba,"
+                "colorchannelmixer=aa=0.88[follow]"
+            )
+            next_stage = f"stage{stage_count}"
+            stage_count += 1
+            parts.append(
+                f"[{stage}][follow]overlay="
+                "x=W-w-48:y=H-h-210:enable='lt(mod(t\\,15)\\,5)':format=auto"
+                f"[{next_stage}]"
+            )
+            stage = next_stage
+
+        next_stage = f"stage{stage_count}"
+        parts.append(
+            f"[{stage}]drawtext=text='{title}':"
+            "fontcolor=0x39FF14:fontsize=64:font='Arial':box=1:"
+            "boxcolor=black@0.86:boxborderw=24:x=(w-text_w)/2:y=(h-text_h)/2:"
+            f"enable='lt(mod(t\\,{interval})\\,3)'[{next_stage}]"
+        )
+        stage = next_stage
+
+        parts.append(
+            f"[{stage}]drawtext=text='LIKE':fontcolor=white:fontsize=46:"
+            "font='Arial Bold':box=1:boxcolor=0x10B981@0.82:boxborderw=18:"
+            "x=54:y=H-360:enable='between(mod(t\\,12)\\,1\\,4)'[video_speed]"
+        )
+        parts.append(f"[video_speed]setpts=PTS/{speed:.5f},setsar=1[vout]")
+        parts.append(
+            f"[{audio_index}:a]atempo={speed:.5f},volume={volume_db:.2f}dB,"
+            "afftdn=nf=-25,highpass=f=80,lowpass=f=15000,"
+            "acompressor=threshold=-18dB:ratio=2.5:attack=20:release=250,"
+            "alimiter=limit=0.97[aout]"
+        )
+
+        return ";".join(parts)
+
+    def _append_ending(self, main_video: Path) -> Path:
+        normalized_ending = self.temp_dir / "ending_normalized.mp4"
+        output = self.temp_dir / "with_ending.mp4"
+        concat_list = self.temp_dir / "concat.txt"
+        ending_info = self._probe(self.ending_path)
+        ending_duration = float(ending_info.get("duration") or 1)
+        ending_has_audio = self._has_audio(ending_info)
+
+        normalize_command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-y",
+            "-i",
+            str(self.ending_path),
         ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            logger.warning(f"No se pudo agregar ending: {result.stderr}")
-            return video_path
+        if not ending_has_audio:
+            normalize_command.extend(
+                [
+                    "-f",
+                    "lavfi",
+                    "-t",
+                    f"{ending_duration:.3f}",
+                    "-i",
+                    "anullsrc=channel_layout=stereo:sample_rate=48000",
+                ]
+            )
+
+        normalize_command.extend(
+            [
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0" if ending_has_audio else "1:a:0",
+            "-vf",
+            (
+                f"fps={self.FPS},scale={self.WIDTH}:{self.HEIGHT}:"
+                f"force_original_aspect_ratio=decrease,pad={self.WIDTH}:{self.HEIGHT}:"
+                "(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p"
+            ),
+            "-af",
+            "aresample=48000",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            str(normalized_ending),
+            ]
+        )
+        self._run_ffmpeg(normalize_command, target_duration=None, start=88, end=93)
+
+        concat_list.write_text(
+            f"file '{main_video.as_posix()}'\nfile '{normalized_ending.as_posix()}'\n",
+            encoding="utf-8",
+        )
+        concat_command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_list),
+            "-c",
+            "copy",
+            str(output),
+        ]
+        self._run_ffmpeg(concat_command, target_duration=None, start=94, end=99)
         return output
-    
-    def _cleanup(self):
-        """Limpiar temporales"""
-        try:
-            if os.path.exists(self.temp_dir):
-                shutil.rmtree(self.temp_dir)
-        except:
-            pass
+
+    def _run_ffmpeg(
+        self,
+        command: list[str],
+        target_duration: float | None,
+        start: int,
+        end: int,
+    ) -> None:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        output_lines: list[str] = []
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            line = line.strip()
+            if line:
+                output_lines.append(line)
+            if target_duration and line.startswith("out_time_ms="):
+                try:
+                    seconds = int(line.split("=", 1)[1]) / 1_000_000
+                    percent = start + int((seconds / target_duration) * (end - start))
+                    self._progress(min(end, max(start, percent)), "Renderizando video")
+                except ValueError:
+                    pass
+
+        return_code = process.wait()
+        if return_code != 0:
+            tail = "\n".join(output_lines[-30:])
+            raise RuntimeError(f"FFmpeg fallo con codigo {return_code}:\n{tail}")
+
+    def _probe(self, path: Path) -> dict:
+        command = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            str(path),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
+        if result.returncode != 0:
+            raise RuntimeError(f"No pude leer el video con ffprobe: {result.stderr}")
+        data = json.loads(result.stdout)
+        duration = data.get("format", {}).get("duration")
+        return {"duration": duration, "streams": data.get("streams", [])}
+
+    @staticmethod
+    def _has_audio(info: dict) -> bool:
+        return any(stream.get("codec_type") == "audio" for stream in info.get("streams", []))
+
+    def _ensure_tools(self) -> None:
+        for tool in ("ffmpeg", "ffprobe"):
+            if shutil.which(tool) is None:
+                raise RuntimeError(f"{tool} no esta instalado o no esta en el PATH.")
+
+    def _progress(self, percent: int, step: str) -> None:
+        if self.progress_callback:
+            self.progress_callback(percent, step)
+
+    @staticmethod
+    def _even(value: int) -> int:
+        return value if value % 2 == 0 else value + 1
+
+    @staticmethod
+    def _clamp(value: float, minimum: float, maximum: float) -> float:
+        return max(minimum, min(maximum, float(value)))
+
+    @staticmethod
+    def _escape_drawtext(text: str) -> str:
+        return (
+            text.replace("\\", "\\\\")
+            .replace(":", "\\:")
+            .replace("'", "\\'")
+            .replace("%", "\\%")
+            .replace("\n", " ")
+        )

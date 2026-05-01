@@ -8,6 +8,7 @@ ENV/
 env/
 .venv
 .env
+.tmp/
 
 # IDE
 .vscode/
@@ -23,6 +24,7 @@ Thumbs.db
 # Project
 assets/uploads/*
 assets/outputs/*
+assets/outputs/.workfast_tmp/
 !assets/uploads/.gitkeep
 !assets/outputs/.gitkeep
 *.mp4

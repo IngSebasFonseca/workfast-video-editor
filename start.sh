@@ -1,51 +1,34 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo ""
-echo "╔════════════════════════════════════════════╗"
-echo "║   WorkFast Video Editor - Setup Script    ║"
-echo "╚════════════════════════════════════════════╝"
-echo ""
+cd "$(dirname "$0")"
 
-# Verificar si Python está instalado
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python3 no está instalado"
-    exit 1
-fi
+echo "WorkFast Video Editor"
+echo "====================="
 
-echo "✅ Python3 detectado"
+command -v python3 >/dev/null || {
+  echo "ERROR: python3 is not installed."
+  exit 1
+}
 
-# Verificar si FFmpeg está instalado
-if ! command -v ffmpeg &> /dev/null; then
-    echo "⚠️  FFmpeg no está instalado"
-    echo "Instálalo con: brew install ffmpeg (Mac) o sudo apt-get install ffmpeg (Linux)"
-fi
+command -v ffmpeg >/dev/null || {
+  echo "ERROR: ffmpeg is not installed."
+  exit 1
+}
 
-# Crear virtual environment
+command -v ffprobe >/dev/null || {
+  echo "ERROR: ffprobe is not installed."
+  exit 1
+}
+
 if [ ! -d "venv" ]; then
-    echo "📦 Creando entorno virtual..."
-    python3 -m venv venv
-    source venv/bin/activate
-    echo "✅ Entorno virtual creado"
-else
-    echo "✅ Entorno virtual detectado"
-    source venv/bin/activate
+  python3 -m venv venv
 fi
 
-echo ""
-echo "📥 Instalando dependencias..."
-pip install -r requirements.txt --quiet
+source venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
 
-echo ""
-echo ""
-echo "╔════════════════════════════════════════════╗"
-echo "║          ✅ SETUP COMPLETADO              ║"
-echo "╚════════════════════════════════════════════╝"
-echo ""
-echo "🚀 Iniciando servidor..."
-echo "   Accede a: http://localhost:5000"
-echo ""
-echo "Presiona Ctrl+C para detener el servidor"
-echo ""
-
-cd backend
-python main.py
+echo
+echo "Server running at http://localhost:5000"
+python backend/main.py

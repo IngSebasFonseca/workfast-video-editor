@@ -1,175 +1,169 @@
-from flask import Flask, request, jsonify, send_file, Response
+from __future__ import annotations
+
+import threading
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-import os
+
 from video_processor import VideoEditor
-import threading
-import json
-from datetime import datetime
-from queue import Queue
 
-app = Flask(__name__)
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+FRONTEND_DIR = BASE_DIR / "frontend"
+UPLOAD_FOLDER = BASE_DIR / "assets" / "uploads"
+OUTPUT_FOLDER = BASE_DIR / "assets" / "outputs"
+
+ALLOWED_EXTENSIONS = {"mp4", "avi", "mov", "mkv", "png", "jpg", "jpeg", "webp"}
+
+app = Flask(__name__, static_folder=None)
 CORS(app)
+app.config["MAX_CONTENT_LENGTH"] = 2_000 * 1024 * 1024
 
-# Cola para mensajes de progreso
-progress_queue = Queue()
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 
-UPLOAD_FOLDER = "../assets/uploads"
-OUTPUT_FOLDER = "../assets/outputs"
-TEMPLATES_FOLDER = "../assets/templates"
-ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv', 'png', 'jpg', 'jpeg'}
+jobs: dict[str, dict] = {}
+jobs_lock = threading.Lock()
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 2000 * 1024 * 1024  # 2GB
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/api/health', methods=['GET'])
+def set_job(job_id: str, **updates) -> None:
+    with jobs_lock:
+        jobs.setdefault(job_id, {}).update(updates)
+        jobs[job_id]["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+
+@app.get("/")
+def index():
+    return send_from_directory(FRONTEND_DIR, "index.html")
+
+
+@app.get("/<path:path>")
+def static_files(path: str):
+    return send_from_directory(FRONTEND_DIR, path)
+
+
+@app.get("/api/health")
 def health():
-    return jsonify({'status': 'ok', 'message': 'Server running'}), 200
+    return jsonify({"status": "ok", "message": "WorkFast server running"})
 
-@app.route('/api/upload', methods=['POST'])
+
+@app.post("/api/upload")
 def upload_file():
-    """Subir video y assets"""
-    try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-        
-        file = request.files['file']
-        file_type = request.form.get('type', 'video')  # video, logo, ending, follow
-        
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-        
-        if file and allowed_file(file.filename):
-            filename = secure_filename(f"{file_type}_{file.filename}")
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            
-            return jsonify({
-                'success': True,
-                'filename': filename,
-                'filepath': filepath,
-                'type': file_type
-            }), 200
-        
-        return jsonify({'error': 'File type not allowed'}), 400
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    file = request.files.get("file")
+    file_type = secure_filename(request.form.get("type", "file"))
 
-@app.route('/api/process', methods=['POST'])
+    if not file or not file.filename:
+        return jsonify({"error": "No seleccionaste ningun archivo."}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Tipo de archivo no permitido."}), 400
+
+    original_name = secure_filename(file.filename)
+    unique_name = f"{file_type}_{uuid.uuid4().hex[:10]}_{original_name}"
+    filepath = UPLOAD_FOLDER / unique_name
+    file.save(filepath)
+
+    return jsonify(
+        {
+            "success": True,
+            "filename": unique_name,
+            "filepath": str(filepath),
+            "type": file_type,
+        }
+    )
+
+
+@app.post("/api/process")
 def process_video():
-    """Procesar video con ediciones automáticas"""
-    try:
-        data = request.json
-        input_video = data.get('input_video')
-        logo_path = data.get('logo_path')
-        ending_path = data.get('ending_path')
-        follow_image_path = data.get('follow_image_path')
-        title_text = data.get('title_text', 'Mi Video')
-        
-        # Parámetros con defaults
-        speed = float(data.get('speed', 1.05))
-        zoom_bottom = float(data.get('zoom_bottom', 1.96))
-        zoom_top = float(data.get('zoom_top', 0.96))
-        saturation = float(data.get('saturation', 100))
-        volume_db = float(data.get('volume_db', 5.4))
-        filter_intensity = float(data.get('filter_intensity', 0.24))
-        title_interval = float(data.get('title_interval', 10))
-        
-        if not input_video or not os.path.exists(input_video):
-            return jsonify({'error': 'Input video not found'}), 400
-        
-        output_filename = f"edited_{os.path.basename(input_video)}"
-        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-        
-        # Crear editor
-        editor = VideoEditor(
-            input_video=input_video,
-            logo_path=logo_path if logo_path and os.path.exists(logo_path) else None,
-            ending_path=ending_path if ending_path and os.path.exists(ending_path) else None,
-            follow_image_path=follow_image_path,
-            output_path=output_path
-        )
-        
-        # Procesar en background
-        def process_async():
-            try:
-                # Informar que comienza
-                progress_queue.put({'status': 'processing', 'step': 'Iniciando...', 'progress': 10})
-                
-                editor.process_complete(
-                    title_text=title_text,
-                    speed=speed,
-                    zoom_bottom=zoom_bottom,
-                    zoom_top=zoom_top,
-                    saturation=saturation,
-                    volume_db=volume_db,
-                    filter_intensity=filter_intensity,
-                    title_interval=title_interval
-                )
-                
-                # Completado
-                progress_queue.put({'status': 'completed', 'step': 'Completado!', 'progress': 100})
-            except Exception as e:
-                print(f"❌ Error: {e}")
-                progress_queue.put({'status': 'error', 'error': str(e), 'progress': 0})
-        
-        thread = threading.Thread(target=process_async, daemon=True)
-        thread.start()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Processing started',
-            'output_path': output_path,
-            'output_filename': output_filename
-        }), 200
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    data = request.get_json(silent=True) or {}
+    input_video = Path(data.get("input_video", ""))
 
-@app.route('/api/download/<filename>', methods=['GET'])
-def download_file(filename):
-    """Descargar video procesado"""
-    try:
-        filepath = os.path.join(OUTPUT_FOLDER, secure_filename(filename))
-        
-        if not os.path.exists(filepath):
-            return jsonify({'error': 'File not found'}), 404
-        
-        return send_file(filepath, as_attachment=True, download_name=filename)
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    if not input_video.exists():
+        return jsonify({"error": "No encontre el video de entrada."}), 400
 
-@app.route('/api/status', methods=['GET'])
-def status():
-    """Ver estado de procesamiento (Server-Sent Events)"""
-    def generate():
-        while True:
-            try:
-                msg = progress_queue.get(timeout=1)
-                yield f"data: {json.dumps(msg)}\n\n"
-            except:
-                yield f"data: {json.dumps({'status': 'waiting'})}\n\n"
-    
-    return Response(generate(), mimetype='text/event-stream')
+    output_filename = f"edited_{uuid.uuid4().hex[:10]}_{secure_filename(input_video.name)}"
+    output_path = OUTPUT_FOLDER / output_filename
+    job_id = uuid.uuid4().hex
 
-@app.route('/api/progress', methods=['GET'])
-def get_progress():
-    """Obtener último estado"""
-    try:
-        # Obtener sin bloquear
-        msg = progress_queue.get_nowait()
-        return jsonify(msg), 200
-    except:
-        return jsonify({'status': 'idle'}), 200
+    set_job(
+        job_id,
+        status="queued",
+        progress=0,
+        step="En cola",
+        output_filename=output_filename,
+        output_path=str(output_path),
+    )
 
-if __name__ == '__main__':
-    print("🚀 Server iniciado en http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    def progress_callback(progress: int, step: str) -> None:
+        set_job(job_id, status="processing", progress=progress, step=step)
+
+    def worker() -> None:
+        try:
+            set_job(job_id, status="processing", progress=1, step="Iniciando")
+            editor = VideoEditor(
+                input_video=input_video,
+                output_path=output_path,
+                logo_path=data.get("logo_path") or None,
+                ending_path=data.get("ending_path") or None,
+                follow_image_path=data.get("follow_image_path") or None,
+                progress_callback=progress_callback,
+            )
+            editor.process_complete(
+                title_text=data.get("title_text") or "Mi Video",
+                speed=float(data.get("speed", 1.05)),
+                zoom_bottom=float(data.get("zoom_bottom", 1.96)),
+                zoom_top=float(data.get("zoom_top", 0.96)),
+                saturation=float(data.get("saturation", 100)),
+                volume_db=float(data.get("volume_db", 5.4)),
+                filter_intensity=float(data.get("filter_intensity", 0.24)),
+                title_interval=float(data.get("title_interval", 10)),
+            )
+            set_job(
+                job_id,
+                status="completed",
+                progress=100,
+                step="Completado",
+                download_url=f"/api/download/{output_filename}",
+            )
+        except Exception as exc:
+            set_job(job_id, status="error", progress=0, step="Error", error=str(exc))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    return jsonify(
+        {
+            "success": True,
+            "job_id": job_id,
+            "output_filename": output_filename,
+        }
+    )
+
+
+@app.get("/api/jobs/<job_id>")
+def get_job(job_id: str):
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job no encontrado."}), 404
+    return jsonify(job)
+
+
+@app.get("/api/download/<filename>")
+def download_file(filename: str):
+    filepath = OUTPUT_FOLDER / secure_filename(filename)
+    if not filepath.exists():
+        return jsonify({"error": "Archivo no encontrado."}), 404
+    return send_file(filepath, as_attachment=True, download_name=filepath.name)
+
+
+if __name__ == "__main__":
+    print("WorkFast server: http://localhost:5000")
+    app.run(debug=True, host="127.0.0.1", port=5000, threaded=True)

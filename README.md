@@ -1,197 +1,94 @@
-# 🎬 WorkFast Video Editor
+# WorkFast Video Editor
 
-Automatizador de ediciones de video para TikTok y Redes Sociales. Procesa videos con las mismas ediciones que haces manualmente en CapCut.
+App local para automatizar un preset de edicion estilo CapCut/Filmora para videos verticales de redes sociales.
 
-## 📋 Características
+## Que hace
 
-✅ **Duplicación y Espejo**: Capa inferior con efecto espejo  
-✅ **Zoom Personalizado**: 196% abajo, 96% arriba  
-✅ **Procesamiento de Audio**: +5.4dB, denoise, enhancement  
-✅ **Velocidad**: 1.05x en ambas capas  
-✅ **Filtro HD**: 24% de intensidad  
-✅ **Overlay de Logo**: Animación de izquierda a derecha  
-✅ **Títulos Automáticos**: Cada 10 segundos, personalizables  
-✅ **Ending Video**: Agrega tu video de cierre  
-✅ **Formatos**: 9:16 (TikTok), MP4 optimizado  
+- Exporta en formato vertical 9:16, 1080x1920.
+- Duplica el video en dos capas.
+- Capa inferior: espejo horizontal, zoom 196%, saturacion alta y desvanecimiento suave.
+- Capa superior: zoom 96%, filtro HD ligero y enfoque.
+- Acelera video y audio a 1.05x.
+- Audio: +5.4 dB, reduccion de ruido, filtros de voz y limitador.
+- Logo con movimiento de izquierda a derecha durante todo el video.
+- Titulo centrado con fondo negro y texto verde cada 10 segundos.
+- Imagen "sigueme" en intervalos.
+- Badge tipo sticker "LIKE".
+- Ending opcional al final.
+- Barra de progreso real por job.
 
-## 🚀 Instalación
+## Requisitos
 
-### Requisitos
-- Python 3.10+
-- FFmpeg instalado en el sistema
+- Windows 10/11.
+- Python 3.10 o superior.
+- FFmpeg y ffprobe disponibles en PATH.
 
-### Pasos
+Para comprobar FFmpeg:
 
-1. **Clonar o descargar el proyecto**
-```bash
-cd video-editor
+```powershell
+ffmpeg -version
+ffprobe -version
 ```
 
-2. **Crear entorno virtual**
-```bash
-python -m venv venv
-venv\Scripts\activate  # Windows
-source venv/bin/activate  # Mac/Linux
+## Inicio rapido
+
+En PowerShell o CMD:
+
+```bat
+cd C:\Users\fonck\Downloads\Workfast\video-editor
+start.bat
 ```
 
-3. **Instalar dependencias**
-```bash
-pip install -r requirements.txt
-```
+Luego abre:
 
-4. **Instalar FFmpeg** (si no lo tienes)
-```bash
-# Windows (con Chocolatey)
-choco install ffmpeg
-
-# Mac (con Homebrew)
-brew install ffmpeg
-
-# Linux (Ubuntu/Debian)
-sudo apt-get install ffmpeg
-```
-
-## 📁 Estructura de Archivos
-
-```
-video-editor/
-├── backend/
-│   ├── main.py                 # Servidor Flask
-│   ├── video_processor/
-│   │   ├── __init__.py
-│   │   └── editor.py           # Lógica de procesamiento
-│   └── requirements.txt
-├── frontend/
-│   └── index.html              # Interfaz web
-├── assets/
-│   ├── uploads/                # Videos/assets subidos
-│   ├── outputs/                # Videos procesados
-│   └── templates/              # Logo, ending, etc.
-└── README.md
-```
-
-## 🎬 Cómo Usar
-
-### 1. Iniciar el Servidor
-
-```bash
-cd backend
-python main.py
-```
-
-El servidor estará disponible en: `http://localhost:5000`
-
-### 2. Abrir la Interfaz Web
-
-Abre `frontend/index.html` en tu navegador o accede a:
-```
+```text
 http://localhost:5000
 ```
 
-### 3. Cargar Archivos
+## Uso
 
-1. **Video Principal**: Sube tu video (MP4, AVI, MOV, MKV)
-2. **Logo** (Opcional): PNG/JPG con transparencia
-3. **Ending Video** (Opcional): Video MP4 corto para el final
-4. **Imagen Sígueme** (Opcional): PNG/JPG
+1. Sube el video principal.
+2. Sube logo, imagen de sigueme y ending si los tienes.
+3. Ajusta titulo y parametros si quieres.
+4. Pulsa `Procesar video`.
+5. Revisa la barra de progreso.
+6. Descarga el resultado cuando termine.
 
-### 4. Configurar Parámetros
+Los videos subidos y generados se guardan localmente en:
 
-- **Título**: Texto que aparecerá en el video
-- **Velocidad**: 1.05x (recomendado)
-- **Zoom**: 196% abajo, 96% arriba
-- **Volumen**: +5.4dB
-- **Filtro HD**: 24% de intensidad
+- `assets/uploads`
+- `assets/outputs`
 
-### 5. Procesar
+Esas carpetas estan ignoradas por Git para no subir tus videos privados.
 
-Click en **"⚡ PROCESAR VIDEO"** y espera a que termine.
+## Desarrollo
 
-### 6. Descargar
+Instalacion manual:
 
-Una vez procesado, descarga tu video editado.
-
-## 📊 Parámetros Detallados
-
-| Parámetro | Valor Default | Rango | Descripción |
-|-----------|---------------|-------|-------------|
-| Velocidad | 1.05x | 0.5x - 2x | Velocidad de reproducción |
-| Zoom Abajo | 196% | 100% - 300% | Zoom de capa inferior (espejo) |
-| Zoom Arriba | 96% | 50% - 200% | Zoom de capa principal |
-| Saturación | 100% | 0% - 200% | Intensidad de colores (capa inferior) |
-| Volumen Audio | +5.4dB | -20dB - +20dB | Ganancia de volumen |
-| Intervalo Títulos | 10s | 5s - 30s | Cada cuántos segundos aparece un título |
-| Filtro HD | 24% | 0% - 100% | Intensidad del filtro de claridad |
-
-## 🎨 Personalización
-
-### Cambiar Colores de Títulos
-
-Edita `frontend/index.html` (línea ~250):
-
-```javascript
-// Cambiar color del texto
-txt_clip = TextClip(title_text, color='#00FF00')  // Verde
+```powershell
+python -m venv venv
+venv\Scripts\activate
+python -m pip install -r requirements.txt
+python backend\main.py
 ```
 
-### Agregar Más Efectos
+Prueba de humo:
 
-En `backend/video_processor/editor.py`, agrega métodos como:
-
-```python
-def custom_effect(self, video_clip):
-    # Tu efecto aquí
-    return video_clip
+```powershell
+python scripts\smoke_test.py
 ```
 
-## ⚙️ Troubleshooting
+## Estructura
 
-### Error: "FFmpeg not found"
-Asegúrate de instalar FFmpeg y añadirlo a PATH.
-
-### Error: "Movie py not working"
-```bash
-pip install --upgrade moviepy
+```text
+backend/
+  main.py
+  video_processor/editor.py
+frontend/
+  index.html
+assets/
+  uploads/
+  outputs/
+requirements.txt
+start.bat
 ```
-
-### Video muy lento en procesar
-- Reduce la resolución del video original
-- Disminuye tamaño de fuentes/overlays
-
-### Audio desincronizado
-- Verifica que el video fuente sea válido
-- Intenta con otro códec de audio
-
-## 🔧 Desarrollo
-
-Para agregar características nuevas:
-
-1. Edita `backend/video_processor/editor.py`
-2. Agrega métodos nuevos a la clase `VideoEditor`
-3. Llama desde `main.py` en la ruta `/api/process`
-4. Actualiza `frontend/index.html` con nuevos controls
-
-## 📦 Deploy
-
-Para desplegar en servidor:
-
-```bash
-# Usar Gunicorn
-pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:5000 backend.main:app
-```
-
-## 📄 Licencia
-
-Este proyecto es de código abierto. Úsalo libremente.
-
-## 💬 Soporte
-
-Si encuentras problemas:
-1. Verifica que todos los archivos estén en lugar correcto
-2. Asegúrate de tener permisos en la carpeta `assets/`
-3. Revisa la consola del servidor para errores
-
----
-
-**Creado con ❤️ para creators de contenido**
