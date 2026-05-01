@@ -20,6 +20,7 @@ class VideoEditor:
     HEIGHT = 1920
     FPS = 30
     TITLE_FONT = "C\\:/Windows/Fonts/arialbd.ttf"
+    _ENCODER_CACHE: dict[str, bool] = {}
 
     def __init__(
         self,
@@ -456,6 +457,8 @@ class VideoEditor:
 
     @staticmethod
     def _has_encoder(name: str) -> bool:
+        if name in VideoEditor._ENCODER_CACHE:
+            return VideoEditor._ENCODER_CACHE[name]
         try:
             result = subprocess.run(
                 ["ffmpeg", "-hide_banner", "-encoders"],
@@ -465,8 +468,11 @@ class VideoEditor:
                 errors="replace",
                 timeout=10,
             )
-            return result.returncode == 0 and name in result.stdout
+            available = result.returncode == 0 and name in result.stdout
+            VideoEditor._ENCODER_CACHE[name] = available
+            return available
         except Exception:
+            VideoEditor._ENCODER_CACHE[name] = False
             return False
 
     def _progress(self, percent: int, step: str) -> None:

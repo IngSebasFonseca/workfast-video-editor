@@ -118,6 +118,7 @@
         }
 
         .hidden { display: none; }
+        .is-hidden { display: none !important; }
 
         .file-chip {
             margin-top: 10px;
@@ -284,6 +285,13 @@
             line-height: 1.25;
         }
 
+        .connection-card {
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            background: #111419;
+        }
+
         .asset-select {
             width: 100%;
             min-height: 38px;
@@ -293,6 +301,25 @@
             color: var(--text);
             padding: 8px 10px;
             margin-top: 8px;
+        }
+
+        .advanced-panel {
+            margin-top: 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #111419;
+            padding: 10px;
+        }
+
+        .advanced-panel summary {
+            cursor: pointer;
+            color: var(--text);
+            font-weight: 800;
+            font-size: 13px;
+        }
+
+        .advanced-panel[open] summary {
+            margin-bottom: 12px;
         }
 
         .stage {
@@ -502,6 +529,24 @@
             font-size: 12px;
         }
 
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 22px;
+            border-radius: 999px;
+            padding: 0 8px;
+            margin-right: 6px;
+            background: #2a3039;
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 800;
+        }
+
+        .status-ready { background: rgba(255,184,77,.14); color: #ffd69a; }
+        .status-processing, .status-importing { background: rgba(40,210,194,.14); color: #9ef4eb; }
+        .status-completed { background: rgba(57,255,136,.14); color: #baf7d2; }
+        .status-error { background: rgba(255,107,107,.14); color: #ffc0c0; }
+
         .queue-actions {
             display: flex;
             gap: 6px;
@@ -586,14 +631,16 @@
                     </div>
                 </div>
                 <input class="hidden" id="youtubeCookieBrowser" type="hidden" value="auto">
-                <div class="youtube-cookie-row">
-                    <button class="mini-btn secondary" id="youtubeLoginBtn">Conectar YouTube</button>
-                    <button class="mini-btn secondary" id="youtubeCaptureBtn">Guardar acceso</button>
+                <div class="connection-card">
+                    <div class="youtube-cookie-row">
+                        <button class="mini-btn secondary" id="youtubeLoginBtn">Conectar YouTube</button>
+                        <button class="mini-btn secondary is-hidden" id="youtubeCaptureBtn">Guardar acceso</button>
+                    </div>
+                    <div class="mini-status" id="youtubeCookiesStatus">YouTube sin conectar</div>
                 </div>
-                <div class="mini-status" id="youtubeCookiesStatus">Sin sesion guardada</div>
                 <div style="height: 8px"></div>
                 <input class="hidden" id="youtubeCookiesInput" type="file" accept=".txt,text/plain">
-                <div class="alert" id="youtubeStatus">Conecta YouTube una vez si la importacion pide verificar tu cuenta.</div>
+                <div class="alert" id="youtubeStatus">Pega un link y carga videos.</div>
                 <div style="height: 10px"></div>
                 <div class="youtube-list" id="youtubeList"></div>
             </div>
@@ -651,45 +698,48 @@
 
         <aside class="inspector">
             <div class="section" style="border-top: 0; padding-top: 0;">
-                <h2>Preset CapCut</h2>
+                <h2>Produccion</h2>
                 <div class="field">
-                    <label for="titleInput">Titulo del video</label>
+                    <label for="titleInput">Titulo por defecto</label>
                     <input id="titleInput" type="text" placeholder="Ej: Xbox One o PS4">
                 </div>
-                <div class="grid-2">
-                    <div class="field">
-                        <label for="speedInput">Velocidad</label>
-                        <input id="speedInput" type="number" value="1.05" min="0.5" max="2" step="0.01">
+                <details class="advanced-panel">
+                    <summary>Ajustes avanzados</summary>
+                    <div class="grid-2">
+                        <div class="field">
+                            <label for="speedInput">Velocidad</label>
+                            <input id="speedInput" type="number" value="1.05" min="0.5" max="2" step="0.01">
+                        </div>
+                        <div class="field">
+                            <label for="volumeInput">Audio dB</label>
+                            <input id="volumeInput" type="number" value="5.4" step="0.1">
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="field">
+                            <label for="zoomBottomInput">Zoom abajo %</label>
+                            <input id="zoomBottomInput" type="number" value="196" min="100" max="300" step="1">
+                        </div>
+                        <div class="field">
+                            <label for="zoomTopInput">Zoom arriba %</label>
+                            <input id="zoomTopInput" type="number" value="96" min="50" max="150" step="1">
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="field">
+                            <label for="saturationInput">Saturacion abajo %</label>
+                            <input id="saturationInput" type="number" value="100" min="0" max="100" step="1">
+                        </div>
+                        <div class="field">
+                            <label for="filterIntensityInput">Filtro HD %</label>
+                            <input id="filterIntensityInput" type="number" value="24" min="0" max="100" step="1">
+                        </div>
                     </div>
                     <div class="field">
-                        <label for="volumeInput">Audio dB</label>
-                        <input id="volumeInput" type="number" value="5.4" step="0.1">
+                        <label for="titleIntervalInput">Intervalo de titulo en segundos</label>
+                        <input id="titleIntervalInput" type="number" value="10" min="3" max="60" step="1">
                     </div>
-                </div>
-                <div class="grid-2">
-                    <div class="field">
-                        <label for="zoomBottomInput">Zoom abajo %</label>
-                        <input id="zoomBottomInput" type="number" value="196" min="100" max="300" step="1">
-                    </div>
-                    <div class="field">
-                        <label for="zoomTopInput">Zoom arriba %</label>
-                        <input id="zoomTopInput" type="number" value="96" min="50" max="150" step="1">
-                    </div>
-                </div>
-                <div class="grid-2">
-                    <div class="field">
-                        <label for="saturationInput">Saturacion abajo %</label>
-                        <input id="saturationInput" type="number" value="100" min="0" max="100" step="1">
-                    </div>
-                    <div class="field">
-                        <label for="filterIntensityInput">Filtro HD %</label>
-                        <input id="filterIntensityInput" type="number" value="24" min="0" max="100" step="1">
-                    </div>
-                </div>
-                <div class="field">
-                    <label for="titleIntervalInput">Intervalo de titulo en segundos</label>
-                    <input id="titleIntervalInput" type="number" value="10" min="3" max="60" step="1">
-                </div>
+                </details>
             </div>
 
             <div class="section action-panel">
@@ -947,7 +997,7 @@
                         <div class="queue-thumb">${item.thumbnail ? `<img src="${escapeHtml(item.thumbnail)}" alt="">` : escapeHtml((item.title || "V").slice(0, 1).toUpperCase())}</div>
                         <div>
                             <input class="queue-title" data-title-id="${escapeHtml(item.id)}" value="${escapeHtml(item.title)}" ${item.status === "processing" ? "disabled" : ""}>
-                            <div class="queue-meta">${escapeHtml(statusLabel(item))} · ${escapeHtml(item.source)}${item.progress ? ` · ${item.progress}%` : ""}</div>
+                            <div class="queue-meta"><span class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusLabel(item))}</span>${escapeHtml(item.source)}${item.progress ? ` · ${item.progress}%` : ""}</div>
                         </div>
                         <div class="queue-actions">
                             ${item.outputFilename ? `<button class="icon-btn" data-download-id="${escapeHtml(item.id)}">Descargar</button>` : ""}
@@ -1066,10 +1116,12 @@
                 const data = await response.json();
                 if (!response.ok || !data.success) throw new Error(data.error || "No pude leer cookies");
                 document.getElementById("youtubeCookiesStatus").textContent = data.configured
-                    ? `Sesion guardada (${formatSize(data.size)})`
-                    : "Sin sesion guardada";
+                    ? "YouTube conectado"
+                    : "YouTube sin conectar";
+                document.getElementById("youtubeLoginBtn").textContent = data.configured ? "Reconectar YouTube" : "Conectar YouTube";
+                document.getElementById("youtubeCaptureBtn").classList.add("is-hidden");
             } catch (error) {
-                document.getElementById("youtubeCookiesStatus").textContent = "Sesion no disponible";
+                document.getElementById("youtubeCookiesStatus").textContent = "YouTube sin conectar";
             }
         }
 
@@ -1081,7 +1133,8 @@
                 const response = await fetch(`${API_BASE}/youtube/login-browser`, { method: "POST" });
                 const data = await response.json();
                 if (!response.ok || !data.success) throw new Error(data.error || "No pude abrir Chrome");
-                setYoutubeStatus("Inicia sesion en YouTube en la ventana que se abrio. Luego pulsa Guardar acceso.", "success");
+                document.getElementById("youtubeCaptureBtn").classList.remove("is-hidden");
+                setYoutubeStatus("Cuando termine el acceso en Chrome, pulsa Guardar acceso.", "success");
             } catch (error) {
                 setYoutubeStatus(error.message, "error");
             } finally {
@@ -1098,8 +1151,10 @@
                 const data = await response.json();
                 if (!response.ok || !data.success) throw new Error(data.error || "No pude guardar la sesion");
                 document.getElementById("youtubeCookieBrowser").value = "file";
-                document.getElementById("youtubeCookiesStatus").textContent = `Sesion guardada (${data.cookie_count || 0} cookies)`;
-                setYoutubeStatus("Acceso guardado. Ya puedes cargar e importar videos.", "success");
+                document.getElementById("youtubeCookiesStatus").textContent = "YouTube conectado";
+                document.getElementById("youtubeLoginBtn").textContent = "Reconectar YouTube";
+                document.getElementById("youtubeCaptureBtn").classList.add("is-hidden");
+                setYoutubeStatus("YouTube conectado. Ya puedes cargar videos.", "success");
             } catch (error) {
                 setYoutubeStatus(error.message, "error");
                 await loadYoutubeCookiesStatus();
