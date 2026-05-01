@@ -31,6 +31,7 @@ OUTPUT_FOLDER = BASE_DIR / "assets" / "outputs"
 LIBRARY_FOLDER = BASE_DIR / "assets" / "library"
 YOUTUBE_COOKIES_FILE = LIBRARY_FOLDER / "youtube_cookies.txt"
 YOUTUBE_BROWSER_PROFILE = LIBRARY_FOLDER / "youtube_chrome_profile"
+PROFILES_FILE = LIBRARY_FOLDER / "profiles.json"
 YOUTUBE_DEBUG_PORT = 9222
 
 ALLOWED_EXTENSIONS = {"mp4", "avi", "mov", "mkv", "png", "jpg", "jpeg", "webp"}
@@ -132,6 +133,61 @@ def list_library_assets(asset_type: str | None = None) -> dict:
         default = next((item for item in assets if item["is_default"]), assets[0] if assets else None)
         result[current_type] = {"default": default, "items": assets}
     return result
+
+
+def load_profiles() -> dict:
+    if not PROFILES_FILE.exists():
+        return {}
+    try:
+        data = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_profiles(profiles: dict) -> None:
+    PROFILES_FILE.write_text(json.dumps(profiles, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def resolve_profile_assets(profile: dict) -> dict:
+    resolved = {}
+    assets = profile.get("assets") or {}
+    for asset_type in sorted(ASSET_TYPES):
+        filename = secure_filename(str(assets.get(asset_type) or ""))
+        path = asset_dir(asset_type) / filename
+        if filename and path.exists() and allowed_asset_file(path.name, asset_type):
+            resolved[asset_type] = serialize_asset(path, asset_type)
+    return resolved
+
+
+def list_profiles() -> list[dict]:
+    profiles = load_profiles()
+    result = []
+    for name, profile in sorted(profiles.items()):
+        result.append(
+            {
+                "name": name,
+                "assets": resolve_profile_assets(profile),
+                "updated_at": profile.get("updated_at"),
+            }
+        )
+    return result
+
+
+def seed_profiles() -> None:
+    profiles = load_profiles()
+    if profiles:
+        return
+    assets = list_library_assets()
+    default_assets = {}
+    for asset_type, bucket in assets.items():
+        if bucket.get("default"):
+            default_assets[asset_type] = bucket["default"]["filename"]
+    if default_assets:
+        now = datetime.utcnow().isoformat() + "Z"
+        profiles["Mi marca"] = {"assets": default_assets, "updated_at": now}
+        profiles["Dramas coreanos"] = {"assets": default_assets, "updated_at": now}
+        save_profiles(profiles)
 
 
 def seed_library_defaults() -> None:
@@ -399,6 +455,7 @@ def normalize_youtube_entry(entry: dict) -> dict:
 
 
 seed_library_defaults()
+seed_profiles()
 
 
 @app.get("/")
@@ -446,6 +503,38 @@ def upload_file():
 @app.get("/api/assets")
 def get_assets():
     return jsonify({"success": True, "assets": list_library_assets()})
+
+
+@app.get("/api/profiles")
+def get_profiles():
+    return jsonify({"success": True, "profiles": list_profiles()})
+
+
+@app.post("/api/profiles")
+def save_profile():
+    data = request.get_json(silent=True) or {}
+    name = " ".join(str(data.get("name") or "").split()).strip()
+    if not name:
+        return jsonify({"error": "Escribe un nombre para el perfil."}), 400
+    if len(name) > 40:
+        name = name[:40].strip()
+
+    incoming_assets = data.get("assets") or {}
+    saved_assets = {}
+    for asset_type in sorted(ASSET_TYPES):
+        raw_value = incoming_assets.get(asset_type) or ""
+        filename = secure_filename(Path(str(raw_value)).name)
+        path = asset_dir(asset_type) / filename
+        if filename and path.exists() and allowed_asset_file(path.name, asset_type):
+            saved_assets[asset_type] = filename
+
+    if not saved_assets:
+        return jsonify({"error": "Selecciona al menos un recurso para guardar el perfil."}), 400
+
+    profiles = load_profiles()
+    profiles[name] = {"assets": saved_assets, "updated_at": datetime.utcnow().isoformat() + "Z"}
+    save_profiles(profiles)
+    return jsonify({"success": True, "profiles": list_profiles()})
 
 
 @app.get("/api/assets/file/<asset_type>/<path:filename>")

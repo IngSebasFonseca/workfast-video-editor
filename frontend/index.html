@@ -303,6 +303,20 @@
             margin-top: 8px;
         }
 
+        .profile-tools {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 92px;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .profile-actions {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 86px;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+
         .advanced-panel {
             margin-top: 10px;
             border: 1px solid var(--line);
@@ -647,6 +661,15 @@
 
             <div class="section">
                 <h2>Recursos</h2>
+                <label for="profileSelect">Perfil</label>
+                <div class="profile-tools">
+                    <select class="control-select" id="profileSelect"></select>
+                    <button class="mini-btn secondary" id="applyProfileBtn">Aplicar</button>
+                </div>
+                <div class="profile-actions">
+                    <input id="profileNameInput" type="text" placeholder="Nuevo perfil">
+                    <button class="mini-btn secondary" id="saveProfileBtn">Guardar</button>
+                </div>
                 <div class="dropzone" data-type="logo">
                     <div><strong>Cambiar logo</strong>Marca de agua de tus videos</div>
                 </div>
@@ -779,6 +802,7 @@
             follow: "Imagen sigueme",
             ending: "Ending"
         };
+        let resourceProfiles = [];
         let loadedYoutubeVideos = [];
 
         const MAX_QUEUE = 5;
@@ -820,6 +844,8 @@
         document.getElementById("youtubeLoginBtn").addEventListener("click", openYoutubeLoginBrowser);
         document.getElementById("youtubeCaptureBtn").addEventListener("click", captureYoutubeSession);
         document.getElementById("youtubeCookiesInput").addEventListener("change", uploadYoutubeCookies);
+        document.getElementById("applyProfileBtn").addEventListener("click", applySelectedProfile);
+        document.getElementById("saveProfileBtn").addEventListener("click", saveCurrentProfile);
 
         Object.entries(assetSelects).forEach(([type, select]) => {
             select.addEventListener("change", () => selectLibraryAsset(type));
@@ -883,6 +909,73 @@
                 const data = await response.json();
                 if (!response.ok || !data.success) throw new Error(data.error || "No pude cargar recursos");
                 applyAssetLibrary(data.assets);
+            } catch (error) {
+                setMessage(error.message, "error");
+            }
+        }
+
+        async function loadProfiles() {
+            try {
+                const response = await fetch(`${API_BASE}/profiles`);
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || "No pude cargar perfiles");
+                resourceProfiles = data.profiles || [];
+                renderProfiles();
+            } catch (error) {
+                setMessage(error.message, "error");
+            }
+        }
+
+        function renderProfiles() {
+            const select = document.getElementById("profileSelect");
+            if (!resourceProfiles.length) {
+                select.innerHTML = `<option value="">Sin perfiles</option>`;
+                return;
+            }
+            select.innerHTML = resourceProfiles.map((profile) => (
+                `<option value="${escapeHtml(profile.name)}">${escapeHtml(profile.name)}</option>`
+            )).join("");
+            const dramas = resourceProfiles.find((profile) => profile.name.toLowerCase().includes("drama"));
+            if (dramas) select.value = dramas.name;
+        }
+
+        function applySelectedProfile() {
+            const name = document.getElementById("profileSelect").value;
+            const profile = resourceProfiles.find((item) => item.name === name);
+            if (!profile) {
+                setMessage("Selecciona un perfil.", "error");
+                return;
+            }
+            ["logo", "follow", "ending"].forEach((type) => {
+                if (profile.assets?.[type]) {
+                    selectAsset(type, profile.assets[type]);
+                }
+            });
+            document.getElementById("profileNameInput").value = profile.name;
+            setMessage(`Perfil aplicado: ${profile.name}`, "success");
+        }
+
+        async function saveCurrentProfile() {
+            const name = document.getElementById("profileNameInput").value.trim()
+                || document.getElementById("profileSelect").value
+                || "Mi marca";
+            const assets = {};
+            ["logo", "follow", "ending"].forEach((type) => {
+                if (uploaded[type]?.filename) assets[type] = uploaded[type].filename;
+            });
+
+            try {
+                const response = await fetch(`${API_BASE}/profiles`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name, assets })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || "No pude guardar el perfil");
+                resourceProfiles = data.profiles || [];
+                renderProfiles();
+                document.getElementById("profileSelect").value = name;
+                setMessage(`Perfil guardado: ${name}`, "success");
             } catch (error) {
                 setMessage(error.message, "error");
             }
@@ -1489,6 +1582,7 @@
                 document.getElementById("serverDot").classList.add("ok");
                 renderQueue();
                 loadAssetLibrary();
+                loadProfiles();
                 loadYoutubeCookiesStatus();
             })
             .catch(() => {
