@@ -17,6 +17,7 @@ App local para automatizar un preset de edicion estilo CapCut/Filmora para video
 - Ending opcional al final.
 - Barra de progreso real por job.
 - Importacion desde YouTube: pega un canal, playlist o video, elige uno e importalo como video principal.
+- Sesion de YouTube desde Edge, Chrome, Firefox o Brave cuando YouTube pide confirmar que no eres bot.
 - Audio HD: denoise, EQ de voz, compresion, loudness y AAC 256 kbps.
 - Biblioteca de recursos: logo, imagen de sigueme y ending quedan guardados como predeterminados.
 
@@ -59,6 +60,8 @@ http://localhost:5000
 7. Descarga el resultado cuando termine.
 
 Usa la importacion de YouTube solo con contenido propio, con permiso o con derechos de uso para tus redes.
+Si YouTube muestra `Sign in to confirm you're not a bot`, abre YouTube en el navegador donde tienes sesion y elige ese navegador en `Sesion YouTube`.
+Si Windows no deja leer esas cookies por DPAPI o por bloqueo del navegador, exporta un archivo Netscape `cookies.txt`, subelo con `Subir cookies` y usa la opcion `cookies.txt`.
 
 Los videos subidos y generados se guardan localmente en:
 
@@ -66,6 +69,14 @@ Los videos subidos y generados se guardan localmente en:
 - `assets/outputs`
 
 Esas carpetas estan ignoradas por Git para no subir tus videos privados.
+
+## Fase 2
+
+El plan de ejecucion para subtitulos tipo Opus Clips, traducciones por idioma y clips automaticos desde videos largos esta en:
+
+```text
+ROADMAP_PHASE_2.md
+```
 
 ## Desarrollo
 
