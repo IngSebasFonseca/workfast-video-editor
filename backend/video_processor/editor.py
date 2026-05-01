@@ -4,6 +4,7 @@ import json
 import math
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 from typing import Callable
 
@@ -210,7 +211,7 @@ class VideoEditor:
         bottom_saturation = 1.0 + self._clamp(saturation, 0.0, 100.0) / 100.0
         contrast = 1.0 + (filter_intensity * 0.35)
         sharpen = 0.25 + (filter_intensity * 0.75)
-        title = self._escape_drawtext(title_text.strip() or "Mi Video")
+        title_lines, title_font_size = self._wrap_title(title_text.strip() or "Mi Video")
         interval = f"{title_interval:.2f}"
         output_duration = max(self.duration / speed, 1.0)
 
@@ -263,25 +264,37 @@ class VideoEditor:
             stage_count += 1
             parts.append(
                 f"[{stage}][follow]overlay="
-                "x=W-w-48:y=H-h-210:enable='lt(mod(t\\,15)\\,5)':"
+                "x=W-w-48:y=H-h-210:enable='between(mod(t\\,20)\\,12\\,17)':"
                 "format=auto:eof_action=repeat:repeatlast=1"
                 f"[{next_stage}]"
             )
             stage = next_stage
 
-        next_stage = f"stage{stage_count}"
-        parts.append(
-            f"[{stage}]drawtext=text='{title}':"
-            "fontcolor=0x39FF14:fontsize=54:font='Arial Bold':box=1:"
-            "boxcolor=black@0.92:boxborderw=24:x=(w-text_w)/2:y=64:"
-            f"enable='lt(mod(t\\,{interval})\\,3)'[{next_stage}]"
-        )
-        stage = next_stage
+        title_start_y = 58
+        title_line_height = title_font_size + 14
+        for index, title_line in enumerate(title_lines):
+            title = self._escape_drawtext(title_line)
+            next_stage = f"stage{stage_count}"
+            stage_count += 1
+            y_position = title_start_y + index * title_line_height
+            parts.append(
+                f"[{stage}]drawtext=text='{title}':"
+                f"fontcolor=0x39FF14:fontsize={title_font_size}:font='Arial Bold':box=1:"
+                f"boxcolor=black@0.92:boxborderw=22:x=(w-text_w)/2:y={y_position}:"
+                f"enable='lt(mod(t\\,{interval})\\,3)'[{next_stage}]"
+            )
+            stage = next_stage
 
         parts.append(
-            f"[{stage}]drawtext=text='LIKE':fontcolor=white:fontsize=46:"
-            "font='Arial Bold':box=1:boxcolor=0x10B981@0.82:boxborderw=18:"
-            "x=54:y=H-360:enable='between(mod(t\\,12)\\,1\\,4)'[video_speed]"
+            f"[{stage}]drawtext=text='{self._escape_drawtext(chr(0x1F44D))}':"
+            "fontcolor=white:fontsize=72:font='Segoe UI Emoji':box=1:"
+            "boxcolor=0x1877F2@0.90:boxborderw=18:"
+            "x=54:y=H-380:enable='between(mod(t\\,20)\\,2\\,6)'[like_icon]"
+        )
+        parts.append(
+            "[like_icon]drawtext=text='ME GUSTA':fontcolor=white:fontsize=36:"
+            "font='Arial Bold':box=1:boxcolor=0x1877F2@0.90:boxborderw=14:"
+            "x=148:y=H-360:enable='between(mod(t\\,20)\\,2\\,6)'[video_speed]"
         )
         parts.append(f"[video_speed]setpts=PTS/{speed:.5f},setsar=1[vout]")
         parts.append(
@@ -448,6 +461,39 @@ class VideoEditor:
     @staticmethod
     def _clamp(value: float, minimum: float, maximum: float) -> float:
         return max(minimum, min(maximum, float(value)))
+
+    @staticmethod
+    def _wrap_title(text: str) -> tuple[list[str], int]:
+        clean_text = " ".join(text.split())
+        if not clean_text:
+            return ["Mi Video"], 54
+
+        lines = textwrap.wrap(
+            clean_text,
+            width=28,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        if not lines:
+            lines = [clean_text]
+
+        if len(lines) > 4:
+            lines = lines[:4]
+            if len(lines[-1]) > 25:
+                lines[-1] = lines[-1][:25].rstrip()
+            lines[-1] = f"{lines[-1]}..."
+
+        max_len = max(len(line) for line in lines)
+        if max_len > 34 or len(lines) >= 4:
+            font_size = 34
+        elif max_len > 28 or len(lines) == 3:
+            font_size = 38
+        elif max_len > 22:
+            font_size = 44
+        else:
+            font_size = 54
+
+        return lines, font_size
 
     @staticmethod
     def _escape_drawtext(text: str) -> str:
