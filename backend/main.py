@@ -33,7 +33,7 @@ YOUTUBE_COOKIE_BROWSERS = {
     "firefox": "firefox",
     "brave": "brave",
 }
-YOUTUBE_AUTO_COOKIE_SEQUENCE = [None, "file", "edge", "chrome", "firefox", "brave"]
+YOUTUBE_AUTO_COOKIE_SEQUENCE = [None, "file"]
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -184,13 +184,19 @@ def youtube_error_message(error: Exception, attempted: list[str | None]) -> str:
     if "not a bot" in raw or "Sign in to confirm" in raw:
         return (
             "YouTube pidio confirmar que no eres bot. Abre YouTube en el navegador donde tienes sesion, "
-            "elige ese navegador en 'Sesion YouTube' y vuelve a cargar. "
+            "sube un cookies.txt o elige manualmente ese navegador en 'Sesion YouTube'. "
             f"Intentos realizados: {tried}."
         )
     if "failed to load cookies" in raw or "could not copy" in raw.lower():
         return (
             "No pude leer las cookies del navegador seleccionado. Cierra ese navegador por unos segundos, "
-            "prueba otro en 'Sesion YouTube' o sube un archivo cookies.txt. "
+            "prueba otro navegador manualmente o sube un archivo cookies.txt. "
+            f"Intentos realizados: {tried}."
+        )
+    if "no devolvio informacion" in raw:
+        return (
+            "YouTube no devolvio informacion sin sesion. Si antes funcionaba, puede ser un bloqueo temporal "
+            "de YouTube para esta IP o este video. Sube un cookies.txt para hacerlo estable. "
             f"Intentos realizados: {tried}."
         )
     return f"No pude leer YouTube ({tried}): {raw}"
