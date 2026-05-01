@@ -255,7 +255,7 @@
 
         .youtube-cookie-row {
             display: grid;
-            grid-template-columns: 128px minmax(0, 1fr);
+            grid-template-columns: 122px 104px minmax(0, 1fr);
             gap: 8px;
             align-items: center;
         }
@@ -497,21 +497,22 @@
                 <div class="field">
                     <label for="youtubeCookieBrowser">Sesion YouTube</label>
                     <select class="control-select" id="youtubeCookieBrowser">
-                        <option value="auto">Auto</option>
-                        <option value="file">cookies.txt</option>
-                        <option value="edge">Microsoft Edge</option>
-                        <option value="chrome">Google Chrome</option>
-                        <option value="firefox">Firefox</option>
-                        <option value="brave">Brave</option>
+                        <option value="auto">Auto: sin sesion + cookies.txt</option>
+                        <option value="file">Usar cookies.txt</option>
+                        <option value="edge">Leer Microsoft Edge</option>
+                        <option value="chrome">Leer Google Chrome</option>
+                        <option value="firefox">Leer Firefox</option>
+                        <option value="brave">Leer Brave</option>
                         <option value="none">Sin sesion</option>
                     </select>
                 </div>
                 <div class="youtube-cookie-row">
                     <button class="mini-btn secondary" id="youtubeCookiesBtn">Subir cookies</button>
+                    <button class="mini-btn secondary" id="youtubeSessionTestBtn">Probar</button>
                     <span class="mini-status" id="youtubeCookiesStatus">Sin cookies.txt</span>
                 </div>
                 <input class="hidden" id="youtubeCookiesInput" type="file" accept=".txt,text/plain">
-                <div class="alert" id="youtubeStatus">Auto intenta sin sesion y usa cookies.txt si lo subiste. Elige un navegador solo si necesitas probarlo manualmente.</div>
+                <div class="alert" id="youtubeStatus">Tener YouTube abierto no comparte la sesion con la app. Usa cookies.txt o elige manualmente el mismo navegador.</div>
                 <div style="height: 10px"></div>
                 <div class="youtube-list" id="youtubeList"></div>
             </div>
@@ -681,6 +682,7 @@
         document.getElementById("youtubeCookiesBtn").addEventListener("click", () => {
             document.getElementById("youtubeCookiesInput").click();
         });
+        document.getElementById("youtubeSessionTestBtn").addEventListener("click", testYoutubeSession);
         document.getElementById("youtubeCookiesInput").addEventListener("change", uploadYoutubeCookies);
 
         Object.entries(assetSelects).forEach(([type, select]) => {
@@ -866,6 +868,33 @@
                 await loadYoutubeCookiesStatus();
             } finally {
                 input.value = "";
+            }
+        }
+
+        async function testYoutubeSession() {
+            const url = document.getElementById("youtubeUrlInput").value.trim();
+            if (!url) {
+                setYoutubeStatus("Pega un link de YouTube para probar esa sesion.", "error");
+                return;
+            }
+
+            const button = document.getElementById("youtubeSessionTestBtn");
+            button.disabled = true;
+            setYoutubeStatus(`Probando sesion: ${getYoutubeSessionLabel()}...`);
+
+            try {
+                const response = await fetch(`${API_BASE}/youtube/list`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url, cookie_browser: getYoutubeCookieBrowser() })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || "No pude probar esa sesion");
+                setYoutubeStatus(`Sesion OK: ${data.count || 0} videos visibles con ${getYoutubeSessionLabel()}.`, "success");
+            } catch (error) {
+                setYoutubeStatus(error.message, "error");
+            } finally {
+                button.disabled = false;
             }
         }
 
@@ -1062,6 +1091,11 @@
 
         function getYoutubeCookieBrowser() {
             return document.getElementById("youtubeCookieBrowser").value || "auto";
+        }
+
+        function getYoutubeSessionLabel() {
+            const select = document.getElementById("youtubeCookieBrowser");
+            return select.options[select.selectedIndex].textContent;
         }
 
         function formatSize(bytes) {
