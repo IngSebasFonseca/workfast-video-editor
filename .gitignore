@@ -34,3 +34,4 @@ assets/outputs/.workfast_tmp/
 
 # Logs
 *.log
+logs/
