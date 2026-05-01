@@ -207,8 +207,8 @@ class VideoEditor:
         top_scale_w = self._even(math.ceil(self.WIDTH * zoom_top))
         top_scale_h = self._even(math.ceil(self.HEIGHT * zoom_top))
         bottom_saturation = 1.0 + self._clamp(saturation, 0.0, 100.0) / 100.0
-        contrast = 1.0 + (filter_intensity * 0.35)
-        sharpen = 0.25 + (filter_intensity * 0.75)
+        contrast = 1.0 + (filter_intensity * 0.12)
+        sharpen = 0.18 + (filter_intensity * 0.45)
         title_lines, title_font_size = self._wrap_title(self._clean_overlay_text(title_text.strip() or "Mi Video"))
         interval = f"{title_interval:.2f}"
         output_duration = max(self.duration / speed, 1.0)
@@ -224,13 +224,20 @@ class VideoEditor:
                 f"({self.WIDTH}-{bottom_crop_w})/2:({self.HEIGHT}-{bottom_crop_h})/2,"
                 f"scale={self.WIDTH}:{self.HEIGHT}:flags=bicubic,"
                 f"eq=saturation={bottom_saturation:.2f}:contrast=1.08:brightness=0.04,"
-                "boxblur=10:1,format=rgba,colorchannelmixer=aa=0.78[bottom]"
+                "boxblur=22:2,format=rgba,colorchannelmixer=aa=0.58[bottom_raw]"
+            ),
+            (
+                f"color=c=white@0.32:s={self.WIDTH}x{self.HEIGHT}:d={output_duration:.3f},"
+                "format=rgba[bottom_veil]"
+            ),
+            (
+                "[bottom_raw][bottom_veil]overlay=0:0:format=auto[bottom]"
             ),
             (
                 f"[top_src]scale={top_scale_w}:{top_scale_h}:"
                 "force_original_aspect_ratio=increase,"
                 f"crop={top_scale_w}:{top_scale_h},"
-                f"eq=contrast={contrast:.2f}:saturation=1.08:brightness=0.01,"
+                f"eq=contrast={contrast:.2f}:saturation=1.00:brightness=0.00,"
                 f"unsharp=5:5:{sharpen:.2f}:3:3:0.20,format=rgba[top]"
             ),
             "[bottom][top]overlay=(W-w)/2:(H-h)/2:format=auto[stage0]",
