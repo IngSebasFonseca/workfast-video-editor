@@ -18,6 +18,7 @@ App local para automatizar un preset de edicion estilo CapCut/Filmora para video
 - Barra de progreso real por job.
 - Importacion desde YouTube: pega un canal, playlist o video, elige uno e importalo como video principal.
 - Audio HD: denoise, EQ de voz, compresion, loudness y AAC 256 kbps.
+- Biblioteca de recursos: logo, imagen de sigueme y ending quedan guardados como predeterminados.
 
 ## Requisitos
 
@@ -51,8 +52,8 @@ http://localhost:5000
 
 1. Sube el video principal.
 2. O pega un link de YouTube, pulsa `Cargar` e importa el video que quieras.
-3. Sube logo, imagen de sigueme y ending si los tienes.
-4. Ajusta titulo y parametros si quieres.
+3. Usa los recursos predeterminados o sube nuevos logo, sigueme y ending.
+4. El titulo se llena con el nombre del video importado/subido y puedes editarlo.
 5. Pulsa `Procesar video`.
 6. Revisa la barra de progreso.
 7. Descarga el resultado cuando termine.

@@ -177,6 +177,17 @@
             padding: 0 10px;
         }
 
+        .asset-select {
+            width: 100%;
+            min-height: 38px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #111419;
+            color: var(--text);
+            padding: 8px 10px;
+            margin-top: 8px;
+        }
+
         .stage {
             padding: 18px;
             display: grid;
@@ -382,6 +393,7 @@
                     <div><strong>Logo</strong>PNG/JPG con transparencia si tienes</div>
                 </div>
                 <input class="hidden" id="logoInput" type="file" accept="image/*">
+                <select class="asset-select" id="logoSelect"></select>
                 <div id="logoChip"></div>
 
                 <div style="height: 12px"></div>
@@ -389,6 +401,7 @@
                     <div><strong>Imagen sigueme</strong>PNG/JPG</div>
                 </div>
                 <input class="hidden" id="followInput" type="file" accept="image/*">
+                <select class="asset-select" id="followSelect"></select>
                 <div id="followChip"></div>
 
                 <div style="height: 12px"></div>
@@ -396,6 +409,7 @@
                     <div><strong>Ending</strong>Video corto final</div>
                 </div>
                 <input class="hidden" id="endingInput" type="file" accept="video/*">
+                <select class="asset-select" id="endingSelect"></select>
                 <div id="endingChip"></div>
             </div>
         </aside>
@@ -493,6 +507,11 @@
             ending: document.getElementById("endingChip")
         };
         const uploaded = { video: null, logo: null, follow: null, ending: null };
+        const assetSelects = {
+            logo: document.getElementById("logoSelect"),
+            follow: document.getElementById("followSelect"),
+            ending: document.getElementById("endingSelect")
+        };
 
         let currentJob = null;
         let currentOutput = null;
@@ -526,8 +545,21 @@
         document.getElementById("downloadBtn").addEventListener("click", downloadVideo);
         document.getElementById("youtubeLoadBtn").addEventListener("click", loadYoutubeVideos);
 
+        Object.entries(assetSelects).forEach(([type, select]) => {
+            select.addEventListener("change", () => selectLibraryAsset(type));
+        });
+
         async function uploadFile(type, file) {
             setMessage(`Subiendo ${file.name}...`);
+            if (type !== "video") {
+                try {
+                    await uploadPersistentAsset(type, file);
+                } catch (error) {
+                    setMessage(error.message, "error");
+                }
+                return;
+            }
+
             const formData = new FormData();
             formData.append("file", file);
             formData.append("type", type);
@@ -537,10 +569,79 @@
                 const data = await response.json();
                 if (!response.ok || !data.success) throw new Error(data.error || "Error al subir archivo");
                 uploaded[type] = data;
+                document.getElementById("titleInput").value = data.title || stripExtension(file.name);
                 chips[type].innerHTML = `<div class="file-chip">${file.name}<br>${formatSize(file.size)}</div>`;
                 setMessage(`${file.name} cargado correctamente.`, "success");
             } catch (error) {
                 setMessage(error.message, "error");
+            }
+        }
+
+        async function uploadPersistentAsset(type, file) {
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("type", type);
+            formData.append("make_default", "true");
+
+            const response = await fetch(`${API_BASE}/assets/upload`, { method: "POST", body: formData });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || "Error al guardar recurso");
+
+            applyAssetLibrary(data.assets);
+            selectAsset(type, data.asset);
+            setMessage(`${file.name} guardado como recurso predeterminado.`, "success");
+        }
+
+        async function loadAssetLibrary() {
+            try {
+                const response = await fetch(`${API_BASE}/assets`);
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || "No pude cargar recursos");
+                applyAssetLibrary(data.assets);
+            } catch (error) {
+                setMessage(error.message, "error");
+            }
+        }
+
+        function applyAssetLibrary(assets) {
+            ["logo", "follow", "ending"].forEach((type) => {
+                const bucket = assets[type] || { items: [], default: null };
+                const select = assetSelects[type];
+                select.innerHTML = `<option value="">Sin ${type}</option>` + bucket.items.map((asset) => (
+                    `<option value="${escapeHtml(asset.filepath)}" data-filename="${escapeHtml(asset.filename)}">${asset.is_default ? "Default - " : ""}${escapeHtml(asset.filename)}</option>`
+                )).join("");
+
+                if (bucket.default) {
+                    select.value = bucket.default.filepath;
+                    selectAsset(type, bucket.default);
+                }
+            });
+        }
+
+        function selectLibraryAsset(type) {
+            const select = assetSelects[type];
+            if (!select.value) {
+                uploaded[type] = null;
+                chips[type].innerHTML = "";
+                return;
+            }
+            const option = select.options[select.selectedIndex];
+            selectAsset(type, {
+                filepath: select.value,
+                filename: option.dataset.filename || option.textContent,
+                type
+            });
+        }
+
+        function selectAsset(type, asset) {
+            uploaded[type] = {
+                filepath: asset.filepath,
+                filename: asset.filename,
+                type
+            };
+            chips[type].innerHTML = `<div class="file-chip">${escapeHtml(asset.filename)}<br>Recurso guardado</div>`;
+            if (assetSelects[type] && asset.filepath) {
+                assetSelects[type].value = asset.filepath;
             }
         }
 
@@ -632,8 +733,10 @@
                     uploaded.video = {
                         filepath: job.filepath,
                         filename: job.filename,
-                        type: "video"
+                        type: "video",
+                        title: job.title || title
                     };
+                    document.getElementById("titleInput").value = job.title || title || "";
                     chips.video.innerHTML = `<div class="file-chip">${escapeHtml(title)}<br>Importado desde YouTube</div>`;
                     setYoutubeStatus("Video importado. Ya puedes procesarlo.", "success");
                     setMessage("Video de YouTube cargado como video principal.", "success");
@@ -777,6 +880,10 @@
             return `${mins}:${secs}`;
         }
 
+        function stripExtension(filename) {
+            return String(filename || "").replace(/\.[^/.]+$/, "").replaceAll("_", " ").replaceAll("-", " ");
+        }
+
         function escapeHtml(value) {
             return String(value || "")
                 .replaceAll("&", "&amp;")
@@ -790,6 +897,7 @@
             .then((response) => {
                 if (!response.ok) throw new Error();
                 document.getElementById("serverDot").classList.add("ok");
+                loadAssetLibrary();
             })
             .catch(() => {
                 document.getElementById("serverDot").classList.add("bad");

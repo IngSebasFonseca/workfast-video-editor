@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
+import shutil
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
@@ -18,8 +19,10 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = BASE_DIR / "frontend"
 UPLOAD_FOLDER = BASE_DIR / "assets" / "uploads"
 OUTPUT_FOLDER = BASE_DIR / "assets" / "outputs"
+LIBRARY_FOLDER = BASE_DIR / "assets" / "library"
 
 ALLOWED_EXTENSIONS = {"mp4", "avi", "mov", "mkv", "png", "jpg", "jpeg", "webp"}
+ASSET_TYPES = {"logo", "follow", "ending"}
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -27,6 +30,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2_000 * 1024 * 1024
 
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
+LIBRARY_FOLDER.mkdir(parents=True, exist_ok=True)
 
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
@@ -34,6 +38,83 @@ jobs_lock = threading.Lock()
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def title_from_filename(filename: str) -> str:
+    stem = Path(filename).stem
+    for prefix in ("video_", "youtube_"):
+        if stem.startswith(prefix):
+            stem = stem[len(prefix):]
+    return stem.replace("_", " ").replace("-", " ").strip() or "Mi Video"
+
+
+def asset_dir(asset_type: str) -> Path:
+    safe_type = secure_filename(asset_type)
+    if safe_type not in ASSET_TYPES:
+        raise ValueError("Tipo de recurso no valido.")
+    folder = LIBRARY_FOLDER / safe_type
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def allowed_asset_file(filename: str, asset_type: str) -> bool:
+    if not allowed_file(filename):
+        return False
+    ext = filename.rsplit(".", 1)[1].lower()
+    if asset_type in {"logo", "follow"}:
+        return ext in {"png", "jpg", "jpeg", "webp"}
+    if asset_type == "ending":
+        return ext in {"mp4", "mov", "mkv", "avi"}
+    return False
+
+
+def serialize_asset(path: Path, asset_type: str) -> dict:
+    return {
+        "type": asset_type,
+        "filename": path.name,
+        "filepath": str(path),
+        "size": path.stat().st_size,
+        "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+        "is_default": path.name.startswith("default_"),
+    }
+
+
+def list_library_assets(asset_type: str | None = None) -> dict:
+    types = [asset_type] if asset_type else sorted(ASSET_TYPES)
+    result: dict[str, dict] = {}
+    for current_type in types:
+        folder = asset_dir(current_type)
+        assets = [
+            serialize_asset(path, current_type)
+            for path in folder.iterdir()
+            if path.is_file() and allowed_asset_file(path.name, current_type)
+        ]
+        assets.sort(key=lambda item: (not item["is_default"], item["updated_at"]))
+        default = next((item for item in assets if item["is_default"]), assets[0] if assets else None)
+        result[current_type] = {"default": default, "items": assets}
+    return result
+
+
+def seed_library_defaults() -> None:
+    patterns = {
+        "logo": "logo_*",
+        "follow": "follow_*",
+        "ending": "ending_*",
+    }
+    for asset_type, pattern in patterns.items():
+        folder = asset_dir(asset_type)
+        if any(path.is_file() and path.name != ".gitkeep" for path in folder.iterdir()):
+            continue
+        candidates = [
+            path
+            for path in UPLOAD_FOLDER.glob(pattern)
+            if path.is_file() and allowed_asset_file(path.name, asset_type)
+        ]
+        if not candidates:
+            continue
+        latest = max(candidates, key=lambda path: path.stat().st_mtime)
+        target = folder / f"default_{secure_filename(latest.name)}"
+        shutil.copy2(latest, target)
 
 
 def set_job(job_id: str, **updates) -> None:
@@ -69,6 +150,9 @@ def normalize_youtube_entry(entry: dict) -> dict:
         "channel": entry.get("channel") or entry.get("uploader") or "",
         "thumbnail": thumbnail,
     }
+
+
+seed_library_defaults()
 
 
 @app.get("/")
@@ -108,8 +192,68 @@ def upload_file():
             "filename": unique_name,
             "filepath": str(filepath),
             "type": file_type,
+            "title": title_from_filename(original_name) if file_type == "video" else "",
         }
     )
+
+
+@app.get("/api/assets")
+def get_assets():
+    return jsonify({"success": True, "assets": list_library_assets()})
+
+
+@app.post("/api/assets/upload")
+def upload_asset():
+    file = request.files.get("file")
+    asset_type = secure_filename(request.form.get("type", ""))
+    make_default = request.form.get("make_default", "true").lower() != "false"
+
+    if asset_type not in ASSET_TYPES:
+        return jsonify({"error": "Tipo de recurso no valido."}), 400
+
+    if not file or not file.filename:
+        return jsonify({"error": "No seleccionaste ningun archivo."}), 400
+
+    if not allowed_asset_file(file.filename, asset_type):
+        return jsonify({"error": "Archivo no permitido para ese recurso."}), 400
+
+    folder = asset_dir(asset_type)
+    original_name = secure_filename(file.filename)
+    prefix = "default" if make_default else asset_type
+    filename = f"{prefix}_{uuid.uuid4().hex[:10]}_{original_name}"
+    filepath = folder / filename
+    file.save(filepath)
+
+    if make_default:
+        for other in folder.glob("default_*"):
+            if other != filepath:
+                other.rename(folder / other.name.replace("default_", f"{asset_type}_", 1))
+
+    return jsonify({"success": True, "asset": serialize_asset(filepath, asset_type), "assets": list_library_assets()})
+
+
+@app.post("/api/assets/default")
+def set_default_asset():
+    data = request.get_json(silent=True) or {}
+    asset_type = secure_filename(data.get("type", ""))
+    filename = secure_filename(data.get("filename", ""))
+
+    if asset_type not in ASSET_TYPES:
+        return jsonify({"error": "Tipo de recurso no valido."}), 400
+
+    folder = asset_dir(asset_type)
+    selected = folder / filename
+    if not selected.exists() or not allowed_asset_file(selected.name, asset_type):
+        return jsonify({"error": "Recurso no encontrado."}), 404
+
+    for other in folder.glob("default_*"):
+        if other != selected:
+            other.rename(folder / other.name.replace("default_", f"{asset_type}_", 1))
+
+    if not selected.name.startswith("default_"):
+        selected = selected.rename(folder / f"default_{selected.name}")
+
+    return jsonify({"success": True, "asset": serialize_asset(selected, asset_type), "assets": list_library_assets()})
 
 
 @app.post("/api/youtube/list")
@@ -186,6 +330,7 @@ def import_youtube_video():
                 }
             ) as ydl:
                 info = ydl.extract_info(url, download=True)
+                info = info or {}
                 downloaded = Path(ydl.prepare_filename(info))
                 if downloaded.suffix.lower() != ".mp4":
                     downloaded = downloaded.with_suffix(".mp4")
@@ -213,6 +358,7 @@ def import_youtube_video():
                 filename=safe_name,
                 filepath=str(final_path),
                 type="video",
+                title=info.get("title") or title_from_filename(final_path.name),
             )
         except Exception as exc:
             set_job(job_id, status="error", progress=0, step="Error", error=str(exc))
