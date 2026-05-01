@@ -5,6 +5,7 @@ import math
 import shutil
 import subprocess
 import textwrap
+import unicodedata
 from pathlib import Path
 from typing import Callable
 
@@ -18,6 +19,7 @@ class VideoEditor:
     WIDTH = 1080
     HEIGHT = 1920
     FPS = 30
+    TITLE_FONT = "C\\:/Windows/Fonts/arialbd.ttf"
 
     def __init__(
         self,
@@ -211,7 +213,7 @@ class VideoEditor:
         bottom_saturation = 1.0 + self._clamp(saturation, 0.0, 100.0) / 100.0
         contrast = 1.0 + (filter_intensity * 0.35)
         sharpen = 0.25 + (filter_intensity * 0.75)
-        title_lines, title_font_size = self._wrap_title(title_text.strip() or "Mi Video")
+        title_lines, title_font_size = self._wrap_title(self._clean_overlay_text(title_text.strip() or "Mi Video"))
         interval = f"{title_interval:.2f}"
         output_duration = max(self.duration / speed, 1.0)
 
@@ -279,24 +281,33 @@ class VideoEditor:
             y_position = title_start_y + index * title_line_height
             parts.append(
                 f"[{stage}]drawtext=text='{title}':"
-                f"fontcolor=0x39FF14:fontsize={title_font_size}:font='Arial Bold':box=1:"
+                f"fontcolor=0x39FF14:fontsize={title_font_size}:fontfile='{self.TITLE_FONT}':box=1:"
                 f"boxcolor=black@0.92:boxborderw=22:x=(w-text_w)/2:y={y_position}:"
                 f"enable='lt(mod(t\\,{interval})\\,3)'[{next_stage}]"
             )
             stage = next_stage
 
-        parts.append(
-            f"[{stage}]drawtext=text='{self._escape_drawtext(chr(0x1F44D))}':"
-            "fontcolor=white:fontsize=72:font='Segoe UI Emoji':box=1:"
-            "boxcolor=0x1877F2@0.90:boxborderw=18:"
-            "x=54:y=H-380:enable='between(mod(t\\,20)\\,2\\,6)'[like_icon]"
-        )
-        parts.append(
-            "[like_icon]drawtext=text='ME GUSTA':fontcolor=white:fontsize=36:"
-            "font='Arial Bold':box=1:boxcolor=0x1877F2@0.90:boxborderw=14:"
-            "x=148:y=H-360:enable='between(mod(t\\,20)\\,2\\,6)'[video_speed]"
-        )
-        parts.append(f"[video_speed]setpts=PTS/{speed:.5f},setsar=1[vout]")
+        like_enable = "between(mod(t\\,20)\\,2\\,6)"
+        like_shapes = [
+            ("54", "1540", "118", "118", "0x1877F2@0.90"),
+            ("78", "1608", "20", "46", "white@0.96"),
+            ("100", "1594", "46", "58", "white@0.96"),
+            ("130", "1576", "20", "34", "white@0.96"),
+            ("144", "1584", "34", "15", "white@0.96"),
+            ("144", "1604", "32", "14", "white@0.96"),
+            ("144", "1622", "28", "13", "white@0.96"),
+            ("144", "1638", "22", "12", "white@0.96"),
+        ]
+        for x, y, width, height, color in like_shapes:
+            next_stage = f"stage{stage_count}"
+            stage_count += 1
+            parts.append(
+                f"[{stage}]drawbox=x={x}:y={y}:w={width}:h={height}:"
+                f"color={color}:t=fill:enable='{like_enable}'[{next_stage}]"
+            )
+            stage = next_stage
+
+        parts.append(f"[{stage}]setpts=PTS/{speed:.5f},setsar=1[vout]")
         parts.append(
             f"[{audio_index}:a]aresample=48000,atempo={speed:.5f},volume={volume_db:.2f}dB,"
             "afftdn=nf=-28,highpass=f=75,lowpass=f=16000,"
@@ -494,6 +505,17 @@ class VideoEditor:
             font_size = 54
 
         return lines, font_size
+
+    @staticmethod
+    def _clean_overlay_text(text: str) -> str:
+        cleaned = []
+        for character in text:
+            category = unicodedata.category(character)
+            if category in {"So", "Cs", "Co", "Cn"}:
+                cleaned.append(" ")
+                continue
+            cleaned.append(character)
+        return " ".join("".join(cleaned).split()) or "Mi Video"
 
     @staticmethod
     def _escape_drawtext(text: str) -> str:
