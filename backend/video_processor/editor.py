@@ -133,12 +133,12 @@ class VideoEditor:
         if self.logo_path and self.logo_path.exists():
             logo_index = next_input_index
             next_input_index += 1
-            inputs.extend(["-loop", "1", "-i", str(self.logo_path)])
+            inputs.extend(["-i", str(self.logo_path)])
 
         if self.follow_image_path and self.follow_image_path.exists():
             follow_index = next_input_index
             next_input_index += 1
-            inputs.extend(["-loop", "1", "-i", str(self.follow_image_path)])
+            inputs.extend(["-i", str(self.follow_image_path)])
 
         filter_complex = self._build_filter_complex(
             title_text=title_text,
@@ -168,9 +168,9 @@ class VideoEditor:
             "-c:v",
             "libx264",
             "-preset",
-            "medium",
+            "faster",
             "-crf",
-            "18",
+            "20",
             "-pix_fmt",
             "yuv420p",
             "-c:a",
@@ -203,8 +203,8 @@ class VideoEditor:
         logo_index: int | None,
         follow_index: int | None,
     ) -> str:
-        bottom_scale_w = self._even(math.ceil(self.WIDTH * zoom_bottom))
-        bottom_scale_h = self._even(math.ceil(self.HEIGHT * zoom_bottom))
+        bottom_crop_w = self._even(math.floor(self.WIDTH / zoom_bottom))
+        bottom_crop_h = self._even(math.floor(self.HEIGHT / zoom_bottom))
         top_scale_w = self._even(math.ceil(self.WIDTH * zoom_top))
         top_scale_h = self._even(math.ceil(self.HEIGHT * zoom_top))
         bottom_saturation = 1.0 + self._clamp(saturation, 0.0, 100.0) / 100.0
@@ -221,15 +221,16 @@ class VideoEditor:
                 f"crop={self.WIDTH}:{self.HEIGHT},split=2[bottom_src][top_src]"
             ),
             (
-                f"[bottom_src]hflip,scale={bottom_scale_w}:{bottom_scale_h},"
-                f"crop={self.WIDTH}:{self.HEIGHT},"
+                f"[bottom_src]hflip,crop={bottom_crop_w}:{bottom_crop_h}:"
+                f"({self.WIDTH}-{bottom_crop_w})/2:({self.HEIGHT}-{bottom_crop_h})/2,"
+                f"scale={self.WIDTH}:{self.HEIGHT}:flags=bicubic,"
                 f"eq=saturation={bottom_saturation:.2f}:contrast=1.08:brightness=0.04,"
-                "gblur=sigma=5,format=rgba,colorchannelmixer=aa=0.78[bottom]"
+                "boxblur=10:1,format=rgba,colorchannelmixer=aa=0.78[bottom]"
             ),
             (
                 f"[top_src]scale={self.WIDTH}:{self.HEIGHT}:force_original_aspect_ratio=decrease,"
                 f"pad={self.WIDTH}:{self.HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-                f"scale={top_scale_w}:{top_scale_h},"
+                f"scale={top_scale_w}:{top_scale_h}:flags=lanczos,"
                 f"pad={self.WIDTH}:{self.HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
                 f"eq=contrast={contrast:.2f}:saturation=1.08:brightness=0.01,"
                 f"unsharp=5:5:{sharpen:.2f}:3:3:0.20,format=rgba[top]"
@@ -249,7 +250,8 @@ class VideoEditor:
             stage_count += 1
             parts.append(
                 f"[{stage}][logo]overlay="
-                f"x='(W-w)*t/{output_duration:.3f}':y=72:format=auto:shortest=1[{next_stage}]"
+                f"x='(W-w)*t/{output_duration:.3f}':y=72:"
+                f"format=auto:eof_action=repeat:repeatlast=1[{next_stage}]"
             )
             stage = next_stage
 
@@ -262,7 +264,8 @@ class VideoEditor:
             stage_count += 1
             parts.append(
                 f"[{stage}][follow]overlay="
-                "x=W-w-48:y=H-h-210:enable='lt(mod(t\\,15)\\,5)':format=auto"
+                "x=W-w-48:y=H-h-210:enable='lt(mod(t\\,15)\\,5)':"
+                "format=auto:eof_action=repeat:repeatlast=1"
                 f"[{next_stage}]"
             )
             stage = next_stage
@@ -334,10 +337,10 @@ class VideoEditor:
             "aresample=48000",
             "-c:v",
             "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "18",
+                "-preset",
+                "faster",
+                "-crf",
+                "20",
             "-c:a",
             "aac",
             "-b:a",
