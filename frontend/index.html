@@ -236,6 +236,19 @@
             margin-bottom: 8px;
         }
 
+        .import-chip {
+            display: inline-flex;
+            min-height: 30px;
+            align-items: center;
+            border-radius: 7px;
+            border: 1px solid #22563d;
+            background: #13261d;
+            color: #baf7d2;
+            font-size: 12px;
+            font-weight: 800;
+            padding: 0 10px;
+        }
+
         .mini-btn {
             min-height: 32px;
             border: 0;
@@ -696,6 +709,7 @@
             follow: "Imagen sigueme",
             ending: "Ending"
         };
+        let loadedYoutubeVideos = [];
 
         const MAX_QUEUE = 5;
         let videoQueue = [];
@@ -883,7 +897,8 @@
                 progress: item.progress || 0,
                 step: item.step || "Pendiente",
                 outputFilename: "",
-                error: ""
+                error: "",
+                youtubeKey: item.youtubeKey || ""
             };
             videoQueue.push(queueItem);
             if (videoQueue.length === 1) {
@@ -891,6 +906,10 @@
             }
             renderQueue();
             return queueItem;
+        }
+
+        function youtubeVideoKey(video) {
+            return video?.id || video?.url || video?.title || "";
         }
 
         function renderQueue() {
@@ -975,8 +994,18 @@
         function updateYoutubeImportButtons() {
             const full = videoQueue.length >= MAX_QUEUE;
             document.querySelectorAll("[data-youtube-index]").forEach((button) => {
-                button.disabled = full;
-                button.textContent = full ? "Cola llena" : "Importar";
+                const video = loadedYoutubeVideos[Number(button.dataset.youtubeIndex)];
+                const key = youtubeVideoKey(video);
+                const alreadyQueued = videoQueue.some((item) => item.youtubeKey && item.youtubeKey === key);
+                button.disabled = full || alreadyQueued;
+                button.textContent = full && !alreadyQueued ? "Cola llena" : alreadyQueued ? "En cola" : "Importar";
+            });
+            document.querySelectorAll("[data-import-chip-index]").forEach((chip) => {
+                const video = loadedYoutubeVideos[Number(chip.dataset.importChipIndex)];
+                const key = youtubeVideoKey(video);
+                const item = videoQueue.find((entry) => entry.youtubeKey && entry.youtubeKey === key);
+                chip.hidden = !item;
+                chip.textContent = item ? statusLabel(item) : "";
             });
         }
 
@@ -1081,6 +1110,7 @@
         }
 
         function renderYoutubeList(videos) {
+            loadedYoutubeVideos = videos;
             const list = document.getElementById("youtubeList");
             if (!videos.length) {
                 list.innerHTML = `<div class="alert">No encontre videos en ese link.</div>`;
@@ -1093,6 +1123,7 @@
                     <div>
                         <div class="youtube-title">${escapeHtml(video.title)}</div>
                         <div class="youtube-meta">${formatDuration(video.duration)} ${escapeHtml(video.channel || "")}</div>
+                        <span class="import-chip" data-import-chip-index="${index}" hidden>En cola</span>
                         <button class="mini-btn" data-youtube-index="${index}">Importar</button>
                     </div>
                 </div>
@@ -1108,12 +1139,19 @@
 
         async function importYoutubeVideo(video) {
             if (!video || !video.url) return;
+            const key = youtubeVideoKey(video);
+            if (videoQueue.some((item) => item.youtubeKey && item.youtubeKey === key)) {
+                setYoutubeStatus("Ese video ya esta en cola.", "success");
+                updateYoutubeImportButtons();
+                return;
+            }
             const queueItem = addVideoToQueue({
                 title: video.title,
                 filename: "",
                 source: "YouTube",
                 status: "importing",
-                step: "En cola para importar"
+                step: "En cola para importar",
+                youtubeKey: key
             });
             if (!queueItem) return;
 
