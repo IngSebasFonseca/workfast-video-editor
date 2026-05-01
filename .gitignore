@@ -29,6 +29,7 @@ assets/library/logo/*
 assets/library/follow/*
 assets/library/ending/*
 assets/library/youtube_cookies.txt
+assets/library/youtube_chrome_profile/
 !assets/uploads/.gitkeep
 !assets/outputs/.gitkeep
 !assets/library/logo/.gitkeep

@@ -60,9 +60,10 @@ http://localhost:5000
 7. Descarga el resultado cuando termine.
 
 Usa la importacion de YouTube solo con contenido propio, con permiso o con derechos de uso para tus redes.
-El modo `Auto` intenta primero sin sesion, como el flujo inicial que ya funcionaba, y luego usa `cookies.txt` si lo subiste.
-Si YouTube muestra `Sign in to confirm you're not a bot`, exporta un archivo Netscape `cookies.txt`, subelo con `Subir cookies` y usa la opcion `cookies.txt`.
-Tambien puedes elegir Edge, Chrome, Firefox o Brave manualmente, pero en Windows a veces falla por DPAPI o porque el navegador bloquea la base de cookies.
+El modo `Auto` intenta primero sin sesion, como el flujo inicial que ya funcionaba, y luego usa la sesion guardada si existe.
+Si YouTube muestra `Sign in to confirm you're not a bot`, pulsa `Abrir login`, inicia sesion en la ventana de Chrome de WorkFast y luego pulsa `Guardar sesion`.
+La sesion se guarda localmente como `assets/library/youtube_cookies.txt`; no se sube a GitHub.
+Tambien puedes subir un archivo Netscape `cookies.txt` manualmente con `Subir cookies`.
 
 Los videos subidos y generados se guardan localmente en:
 

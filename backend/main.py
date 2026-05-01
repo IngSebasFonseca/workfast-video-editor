@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import threading
 import uuid
+import base64
+import json
+import os
+import socket
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, urlparse
 import shutil
+import urllib.request
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
@@ -21,6 +27,8 @@ UPLOAD_FOLDER = BASE_DIR / "assets" / "uploads"
 OUTPUT_FOLDER = BASE_DIR / "assets" / "outputs"
 LIBRARY_FOLDER = BASE_DIR / "assets" / "library"
 YOUTUBE_COOKIES_FILE = LIBRARY_FOLDER / "youtube_cookies.txt"
+YOUTUBE_BROWSER_PROFILE = LIBRARY_FOLDER / "youtube_chrome_profile"
+YOUTUBE_DEBUG_PORT = 9222
 
 ALLOWED_EXTENSIONS = {"mp4", "avi", "mov", "mkv", "png", "jpg", "jpeg", "webp"}
 ASSET_TYPES = {"logo", "follow", "ending"}
@@ -42,6 +50,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2_000 * 1024 * 1024
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 LIBRARY_FOLDER.mkdir(parents=True, exist_ok=True)
+YOUTUBE_BROWSER_PROFILE.mkdir(parents=True, exist_ok=True)
 
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
@@ -200,6 +209,146 @@ def youtube_error_message(error: Exception, attempted: list[str | None]) -> str:
             f"Intentos realizados: {tried}."
         )
     return f"No pude leer YouTube ({tried}): {raw}"
+
+
+def find_chrome_executable() -> str | None:
+    candidates = [
+        os.environ.get("WORKFAST_CHROME_PATH", ""),
+        str(Path(os.environ.get("PROGRAMFILES", "")) / "Google" / "Chrome" / "Application" / "chrome.exe"),
+        str(Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Google" / "Chrome" / "Application" / "chrome.exe"),
+        str(Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe"),
+        str(Path(os.environ.get("PROGRAMFILES", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe"),
+        str(Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe"),
+    ]
+    return next((path for path in candidates if path and Path(path).exists()), None)
+
+
+def open_youtube_login_browser() -> None:
+    chrome_path = find_chrome_executable()
+    if not chrome_path:
+        raise RuntimeError("No encontre Chrome o Edge instalado.")
+
+    subprocess.Popen(
+        [
+            chrome_path,
+            f"--remote-debugging-port={YOUTUBE_DEBUG_PORT}",
+            f"--user-data-dir={YOUTUBE_BROWSER_PROFILE}",
+            "--no-first-run",
+            "--disable-features=DialMediaRouteProvider",
+            "https://www.youtube.com/account",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
+
+
+def read_debug_json(path: str) -> dict | list:
+    with urllib.request.urlopen(f"http://127.0.0.1:{YOUTUBE_DEBUG_PORT}{path}", timeout=3) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def websocket_request(ws_url: str, method: str, params: dict | None = None) -> dict:
+    parsed = urlparse(ws_url)
+    key = base64.b64encode(os.urandom(16)).decode("ascii")
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 80
+    path = parsed.path
+    if parsed.query:
+        path += f"?{parsed.query}"
+
+    with socket.create_connection((host, port), timeout=5) as sock:
+        handshake = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+        )
+        sock.sendall(handshake.encode("ascii"))
+        response = sock.recv(4096)
+        if b" 101 " not in response:
+            raise RuntimeError("No pude conectar con Chrome para leer la sesion.")
+
+        payload = json.dumps({"id": 1, "method": method, "params": params or {}}).encode("utf-8")
+        header = bytearray([0x81])
+        length = len(payload)
+        if length < 126:
+            header.append(0x80 | length)
+        elif length < 65536:
+            header.extend([0x80 | 126, (length >> 8) & 255, length & 255])
+        else:
+            header.append(0x80 | 127)
+            header.extend(length.to_bytes(8, "big"))
+        mask = os.urandom(4)
+        header.extend(mask)
+        masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        sock.sendall(bytes(header) + masked)
+
+        while True:
+            frame_header = sock.recv(2)
+            if len(frame_header) < 2:
+                raise RuntimeError("Chrome cerro la conexion antes de responder.")
+            opcode = frame_header[0] & 0x0F
+            length = frame_header[1] & 0x7F
+            if length == 126:
+                length = int.from_bytes(sock.recv(2), "big")
+            elif length == 127:
+                length = int.from_bytes(sock.recv(8), "big")
+            if frame_header[1] & 0x80:
+                server_mask = sock.recv(4)
+                raw_payload = sock.recv(length)
+                frame_payload = bytes(byte ^ server_mask[index % 4] for index, byte in enumerate(raw_payload))
+            else:
+                frame_payload = sock.recv(length)
+            if opcode == 8:
+                raise RuntimeError("Chrome cerro la conexion.")
+            if opcode != 1:
+                continue
+            message = json.loads(frame_payload.decode("utf-8"))
+            if message.get("id") == 1:
+                if "error" in message:
+                    raise RuntimeError(message["error"].get("message", "Chrome no entrego cookies."))
+                return message.get("result", {})
+
+
+def export_youtube_cookies_from_debug_browser() -> int:
+    try:
+        version = read_debug_json("/json/version")
+    except Exception as exc:
+        raise RuntimeError("Primero pulsa 'Abrir login', inicia sesion en esa ventana y dejala abierta.") from exc
+
+    ws_url = version.get("webSocketDebuggerUrl")
+    if not ws_url:
+        targets = read_debug_json("/json")
+        pages = [target for target in targets if target.get("webSocketDebuggerUrl")]
+        if not pages:
+            raise RuntimeError("No encontre una pestaña de Chrome abierta para WorkFast.")
+        ws_url = pages[0]["webSocketDebuggerUrl"]
+
+    result = websocket_request(ws_url, "Storage.getCookies")
+    cookies = [
+        cookie
+        for cookie in result.get("cookies", [])
+        if "youtube.com" in cookie.get("domain", "") or "google.com" in cookie.get("domain", "")
+    ]
+    if not cookies:
+        raise RuntimeError("No encontre sesion de YouTube. Inicia sesion en la ventana que abrio WorkFast.")
+
+    lines = ["# Netscape HTTP Cookie File", "# Generated by WorkFast Video Editor"]
+    for cookie in cookies:
+        domain = cookie.get("domain", "")
+        include_subdomains = "TRUE" if domain.startswith(".") else "FALSE"
+        path = cookie.get("path") or "/"
+        secure = "TRUE" if cookie.get("secure") else "FALSE"
+        expires = int(cookie.get("expires") or 0)
+        name = cookie.get("name", "")
+        value = cookie.get("value", "")
+        lines.append("\t".join([domain, include_subdomains, path, secure, str(expires), name, value]))
+
+    YOUTUBE_COOKIES_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return len(cookies)
 
 
 def normalize_youtube_entry(entry: dict) -> dict:
@@ -429,6 +578,32 @@ def upload_youtube_cookies():
             "size": YOUTUBE_COOKIES_FILE.stat().st_size,
         }
     )
+
+
+@app.post("/api/youtube/login-browser")
+def youtube_login_browser():
+    try:
+        open_youtube_login_browser()
+        return jsonify({"success": True, "message": "Chrome abierto para iniciar sesion en YouTube."})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.post("/api/youtube/capture-session")
+def youtube_capture_session():
+    try:
+        cookie_count = export_youtube_cookies_from_debug_browser()
+        return jsonify(
+            {
+                "success": True,
+                "configured": True,
+                "cookie_count": cookie_count,
+                "filename": YOUTUBE_COOKIES_FILE.name,
+                "size": YOUTUBE_COOKIES_FILE.stat().st_size,
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.post("/api/youtube/import")
