@@ -4,7 +4,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 import shutil
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
@@ -73,6 +73,7 @@ def serialize_asset(path: Path, asset_type: str) -> dict:
         "type": asset_type,
         "filename": path.name,
         "filepath": str(path),
+        "preview_url": f"/api/assets/file/{asset_type}/{quote(path.name)}",
         "size": path.stat().st_size,
         "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
         "is_default": path.name.startswith("default_"),
@@ -200,6 +201,21 @@ def upload_file():
 @app.get("/api/assets")
 def get_assets():
     return jsonify({"success": True, "assets": list_library_assets()})
+
+
+@app.get("/api/assets/file/<asset_type>/<path:filename>")
+def get_asset_file(asset_type: str, filename: str):
+    safe_type = secure_filename(asset_type)
+    safe_filename = secure_filename(filename)
+
+    if safe_type not in ASSET_TYPES or not safe_filename:
+        return jsonify({"error": "Recurso no valido."}), 400
+
+    filepath = asset_dir(safe_type) / safe_filename
+    if not filepath.exists() or not allowed_asset_file(filepath.name, safe_type):
+        return jsonify({"error": "Recurso no encontrado."}), 404
+
+    return send_file(filepath)
 
 
 @app.post("/api/assets/upload")

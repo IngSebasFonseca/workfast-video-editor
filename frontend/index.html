@@ -121,6 +121,57 @@
             font-size: 13px;
         }
 
+        .asset-preview-card {
+            margin-top: 10px;
+            display: grid;
+            grid-template-columns: 74px minmax(0, 1fr);
+            gap: 10px;
+            align-items: center;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #22563d;
+            background: #13261d;
+        }
+
+        .asset-preview-media {
+            width: 74px;
+            aspect-ratio: 1;
+            border-radius: 7px;
+            background: #090b0e;
+            border: 1px solid rgba(255,255,255,.08);
+            object-fit: contain;
+        }
+
+        video.asset-preview-media {
+            object-fit: cover;
+        }
+
+        .asset-preview-title {
+            color: #dfffea;
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+
+        .asset-preview-name {
+            color: #8ed9ae;
+            font-size: 12px;
+            line-height: 1.25;
+            word-break: break-word;
+        }
+
+        .asset-preview-badge {
+            display: inline-block;
+            margin-top: 7px;
+            padding: 3px 7px;
+            border-radius: 999px;
+            background: rgba(57,255,136,.14);
+            color: #baf7d2;
+            font-size: 11px;
+            font-weight: 800;
+        }
+
         .youtube-tools {
             display: grid;
             grid-template-columns: minmax(0, 1fr) 92px;
@@ -512,6 +563,11 @@
             follow: document.getElementById("followSelect"),
             ending: document.getElementById("endingSelect")
         };
+        const assetLabels = {
+            logo: "Logo",
+            follow: "Imagen sigueme",
+            ending: "Ending"
+        };
 
         let currentJob = null;
         let currentOutput = null;
@@ -608,7 +664,7 @@
                 const bucket = assets[type] || { items: [], default: null };
                 const select = assetSelects[type];
                 select.innerHTML = `<option value="">Sin ${type}</option>` + bucket.items.map((asset) => (
-                    `<option value="${escapeHtml(asset.filepath)}" data-filename="${escapeHtml(asset.filename)}">${asset.is_default ? "Default - " : ""}${escapeHtml(asset.filename)}</option>`
+                    `<option value="${escapeHtml(asset.filepath)}" data-filename="${escapeHtml(asset.filename)}" data-preview-url="${escapeHtml(asset.preview_url || "")}" data-is-default="${asset.is_default ? "1" : "0"}">${asset.is_default ? "Default - " : ""}${escapeHtml(asset.filename)}</option>`
                 )).join("");
 
                 if (bucket.default) {
@@ -629,6 +685,8 @@
             selectAsset(type, {
                 filepath: select.value,
                 filename: option.dataset.filename || option.textContent,
+                preview_url: option.dataset.previewUrl || "",
+                is_default: option.dataset.isDefault === "1",
                 type
             });
         }
@@ -637,12 +695,31 @@
             uploaded[type] = {
                 filepath: asset.filepath,
                 filename: asset.filename,
+                preview_url: asset.preview_url || "",
+                is_default: Boolean(asset.is_default),
                 type
             };
-            chips[type].innerHTML = `<div class="file-chip">${escapeHtml(asset.filename)}<br>Recurso guardado</div>`;
+            chips[type].innerHTML = renderAssetPreview(type, uploaded[type]);
             if (assetSelects[type] && asset.filepath) {
                 assetSelects[type].value = asset.filepath;
             }
+        }
+
+        function renderAssetPreview(type, asset) {
+            const url = asset.preview_url || "";
+            const media = type === "ending"
+                ? `<video class="asset-preview-media" src="${escapeHtml(url)}" muted controls preload="metadata"></video>`
+                : `<img class="asset-preview-media" src="${escapeHtml(url)}" alt="${escapeHtml(assetLabels[type] || "Recurso")}">`;
+            return `
+                <div class="asset-preview-card">
+                    ${media}
+                    <div>
+                        <div class="asset-preview-title">${escapeHtml(assetLabels[type] || "Recurso guardado")}</div>
+                        <div class="asset-preview-name">${escapeHtml(asset.filename)}</div>
+                        <span class="asset-preview-badge">${asset.is_default ? "Predeterminado" : "Guardado"}</span>
+                    </div>
+                </div>
+            `;
         }
 
         async function loadYoutubeVideos() {
