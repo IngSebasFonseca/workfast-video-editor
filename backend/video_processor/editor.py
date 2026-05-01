@@ -287,26 +287,6 @@ class VideoEditor:
             )
             stage = next_stage
 
-        like_enable = "between(mod(t\\,20)\\,2\\,6)"
-        like_shapes = [
-            ("54", "1540", "118", "118", "0x1877F2@0.90"),
-            ("78", "1608", "20", "46", "white@0.96"),
-            ("100", "1594", "46", "58", "white@0.96"),
-            ("130", "1576", "20", "34", "white@0.96"),
-            ("144", "1584", "34", "15", "white@0.96"),
-            ("144", "1604", "32", "14", "white@0.96"),
-            ("144", "1622", "28", "13", "white@0.96"),
-            ("144", "1638", "22", "12", "white@0.96"),
-        ]
-        for x, y, width, height, color in like_shapes:
-            next_stage = f"stage{stage_count}"
-            stage_count += 1
-            parts.append(
-                f"[{stage}]drawbox=x={x}:y={y}:w={width}:h={height}:"
-                f"color={color}:t=fill:enable='{like_enable}'[{next_stage}]"
-            )
-            stage = next_stage
-
         parts.append(f"[{stage}]setpts=PTS/{speed:.5f},setsar=1[vout]")
         parts.append(
             f"[{audio_index}:a]aresample=48000,atempo={speed:.5f},volume={volume_db:.2f}dB,"

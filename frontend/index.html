@@ -432,6 +432,60 @@
             transition: width .25s ease;
         }
 
+        .queue-list {
+            display: grid;
+            gap: 8px;
+            margin-top: 12px;
+            max-height: 190px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        .queue-item {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #111419;
+        }
+
+        .queue-title {
+            width: 100%;
+            min-height: 32px;
+            border: 0;
+            border-radius: 6px;
+            background: #0b0d10;
+            color: var(--text);
+            padding: 6px 8px;
+            font-size: 13px;
+        }
+
+        .queue-meta {
+            margin-top: 5px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .queue-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .icon-btn {
+            min-height: 30px;
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            background: #2a3039;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 0 9px;
+            white-space: nowrap;
+        }
+
         .alert {
             border-radius: 8px;
             padding: 12px;
@@ -558,6 +612,7 @@
                 <div class="progress-track">
                     <div class="progress-fill" id="progressFill"></div>
                 </div>
+                <div class="queue-list" id="queueList"></div>
             </div>
         </section>
 
@@ -605,9 +660,9 @@
             </div>
 
             <div class="section action-panel">
-                <button class="btn" id="processBtn">Procesar video</button>
+                <button class="btn" id="processBtn">Procesar cola</button>
                 <div style="height: 10px"></div>
-                <button class="btn secondary" id="downloadBtn" disabled>Descargar resultado</button>
+                <button class="btn secondary" id="downloadBtn" disabled>Descargar todos</button>
             </div>
 
             <div class="section">
@@ -642,10 +697,13 @@
             ending: "Ending"
         };
 
+        const MAX_QUEUE = 5;
+        let videoQueue = [];
         let currentJob = null;
         let currentOutput = null;
+        let activeQueueItemId = null;
+        let processingQueue = false;
         let pollTimer = null;
-        let importPollTimer = null;
 
         document.querySelectorAll(".dropzone").forEach((zone) => {
             const type = zone.dataset.type;
@@ -672,6 +730,8 @@
 
         document.getElementById("processBtn").addEventListener("click", processVideo);
         document.getElementById("downloadBtn").addEventListener("click", downloadVideo);
+        document.getElementById("queueList").addEventListener("input", updateQueueTitle);
+        document.getElementById("queueList").addEventListener("click", handleQueueAction);
         document.getElementById("youtubeLoadBtn").addEventListener("click", loadYoutubeVideos);
         document.getElementById("youtubeLoginBtn").addEventListener("click", openYoutubeLoginBrowser);
         document.getElementById("youtubeCaptureBtn").addEventListener("click", captureYoutubeSession);
@@ -691,6 +751,10 @@
                 }
                 return;
             }
+            if (videoQueue.length >= MAX_QUEUE) {
+                setMessage(`La cola permite maximo ${MAX_QUEUE} videos.`, "error");
+                return;
+            }
 
             const formData = new FormData();
             formData.append("file", file);
@@ -701,9 +765,14 @@
                 const data = await response.json();
                 if (!response.ok || !data.success) throw new Error(data.error || "Error al subir archivo");
                 uploaded[type] = data;
-                document.getElementById("titleInput").value = data.title || stripExtension(file.name);
-                chips[type].innerHTML = `<div class="file-chip">${file.name}<br>${formatSize(file.size)}</div>`;
-                setMessage(`${file.name} cargado correctamente.`, "success");
+                addVideoToQueue({
+                    filepath: data.filepath,
+                    filename: data.filename,
+                    title: data.title || stripExtension(file.name),
+                    source: "Subido",
+                    status: "ready"
+                });
+                setMessage(`${file.name} agregado a la cola.`, "success");
             } catch (error) {
                 setMessage(error.message, "error");
             }
@@ -796,6 +865,119 @@
                     </div>
                 </div>
             `;
+        }
+
+        function addVideoToQueue(item) {
+            if (videoQueue.length >= MAX_QUEUE) {
+                setMessage(`La cola permite maximo ${MAX_QUEUE} videos.`, "error");
+                return null;
+            }
+
+            const queueItem = {
+                id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+                title: item.title || stripExtension(item.filename || "Mi video"),
+                filename: item.filename || "",
+                filepath: item.filepath || "",
+                source: item.source || "Video",
+                status: item.status || "ready",
+                progress: item.progress || 0,
+                step: item.step || "Pendiente",
+                outputFilename: "",
+                error: ""
+            };
+            videoQueue.push(queueItem);
+            if (videoQueue.length === 1) {
+                document.getElementById("titleInput").value = queueItem.title;
+            }
+            renderQueue();
+            return queueItem;
+        }
+
+        function renderQueue() {
+            const list = document.getElementById("queueList");
+            chips.video.innerHTML = videoQueue.length
+                ? `<div class="file-chip">${videoQueue.length}/${MAX_QUEUE} videos en cola<br>${queueSummary()}</div>`
+                : "";
+
+            if (!videoQueue.length) {
+                list.innerHTML = `<div class="alert">Cola vacia. Importa o sube hasta ${MAX_QUEUE} videos.</div>`;
+            } else {
+                list.innerHTML = videoQueue.map((item) => `
+                    <div class="queue-item" data-queue-id="${escapeHtml(item.id)}">
+                        <div>
+                            <input class="queue-title" data-title-id="${escapeHtml(item.id)}" value="${escapeHtml(item.title)}" ${item.status === "processing" ? "disabled" : ""}>
+                            <div class="queue-meta">${escapeHtml(statusLabel(item))} · ${escapeHtml(item.source)}${item.progress ? ` · ${item.progress}%` : ""}</div>
+                        </div>
+                        <div class="queue-actions">
+                            ${item.outputFilename ? `<button class="icon-btn" data-download-id="${escapeHtml(item.id)}">Descargar</button>` : ""}
+                            <button class="icon-btn" data-remove-id="${escapeHtml(item.id)}" ${item.status === "processing" ? "disabled" : ""}>Quitar</button>
+                        </div>
+                    </div>
+                `).join("");
+            }
+
+            const completed = videoQueue.filter((item) => item.outputFilename).length;
+            const ready = videoQueue.filter((item) => item.status === "ready").length;
+            document.getElementById("processBtn").disabled = processingQueue || !ready;
+            document.getElementById("downloadBtn").disabled = completed === 0;
+            document.getElementById("processBtn").textContent = processingQueue ? "Procesando cola" : `Procesar cola (${ready})`;
+            document.getElementById("downloadBtn").textContent = completed > 1 ? `Descargar todos (${completed})` : "Descargar todos";
+            updateYoutubeImportButtons();
+        }
+
+        function queueSummary() {
+            const counts = videoQueue.reduce((acc, item) => {
+                acc[item.status] = (acc[item.status] || 0) + 1;
+                return acc;
+            }, {});
+            return [
+                counts.ready ? `${counts.ready} pendientes` : "",
+                counts.importing ? `${counts.importing} importando` : "",
+                counts.processing ? `${counts.processing} procesando` : "",
+                counts.completed ? `${counts.completed} listos` : "",
+                counts.error ? `${counts.error} con error` : ""
+            ].filter(Boolean).join(" · ");
+        }
+
+        function statusLabel(item) {
+            const labels = {
+                importing: "Importando",
+                ready: "Pendiente",
+                processing: item.step || "Procesando",
+                completed: "Listo",
+                error: item.error || "Error"
+            };
+            return labels[item.status] || "Pendiente";
+        }
+
+        function updateQueueTitle(event) {
+            const id = event.target.dataset.titleId;
+            if (!id) return;
+            const item = videoQueue.find((entry) => entry.id === id);
+            if (item) item.title = event.target.value;
+        }
+
+        function handleQueueAction(event) {
+            const removeId = event.target.dataset.removeId;
+            const downloadId = event.target.dataset.downloadId;
+            if (removeId) {
+                videoQueue = videoQueue.filter((item) => item.id !== removeId);
+                renderQueue();
+            }
+            if (downloadId) {
+                const item = videoQueue.find((entry) => entry.id === downloadId);
+                if (item?.outputFilename) {
+                    window.location.href = `${API_BASE}/download/${encodeURIComponent(item.outputFilename)}`;
+                }
+            }
+        }
+
+        function updateYoutubeImportButtons() {
+            const full = videoQueue.length >= MAX_QUEUE;
+            document.querySelectorAll("[data-youtube-index]").forEach((button) => {
+                button.disabled = full;
+                button.textContent = full ? "Cola llena" : "Importar";
+            });
         }
 
         async function loadYoutubeVideos() {
@@ -921,11 +1103,20 @@
                     importYoutubeVideo(videos[Number(button.dataset.youtubeIndex)]);
                 });
             });
+            updateYoutubeImportButtons();
         }
 
         async function importYoutubeVideo(video) {
             if (!video || !video.url) return;
-            clearInterval(importPollTimer);
+            const queueItem = addVideoToQueue({
+                title: video.title,
+                filename: "",
+                source: "YouTube",
+                status: "importing",
+                step: "En cola para importar"
+            });
+            if (!queueItem) return;
+
             setYoutubeStatus(`Importando: ${video.title}`);
 
             try {
@@ -936,14 +1127,20 @@
                 });
                 const data = await response.json();
                 if (!response.ok || !data.success) throw new Error(data.error || "No pude iniciar la importacion");
-                importPollTimer = setInterval(() => fetchYoutubeImportStatus(data.job_id, video.title), 1200);
-                fetchYoutubeImportStatus(data.job_id, video.title);
+                queueItem.importJobId = data.job_id;
+                fetchYoutubeImportStatus(queueItem.id, data.job_id, video.title);
             } catch (error) {
+                queueItem.status = "error";
+                queueItem.error = error.message;
+                renderQueue();
                 setYoutubeStatus(error.message, "error");
             }
         }
 
-        async function fetchYoutubeImportStatus(jobId, title) {
+        async function fetchYoutubeImportStatus(queueId, jobId, title) {
+            const queueItem = videoQueue.find((item) => item.id === queueId);
+            if (!queueItem) return;
+
             try {
                 const response = await fetch(`${API_BASE}/jobs/${jobId}`);
                 const job = await response.json();
@@ -951,50 +1148,77 @@
 
                 setYoutubeStatus(`${job.step || "Importando"} ${job.progress || 0}%`);
                 updateProgress(job.progress || 0, job.step || "Importando desde YouTube");
+                queueItem.progress = job.progress || 0;
+                queueItem.step = job.step || "Importando";
+                renderQueue();
 
                 if (job.status === "completed") {
-                    clearInterval(importPollTimer);
-                    uploaded.video = {
-                        filepath: job.filepath,
-                        filename: job.filename,
-                        type: "video",
-                        title: job.title || title
-                    };
-                    document.getElementById("titleInput").value = job.title || title || "";
-                    chips.video.innerHTML = `<div class="file-chip">${escapeHtml(title)}<br>Importado desde YouTube</div>`;
-                    setYoutubeStatus("Video importado. Ya puedes procesarlo.", "success");
-                    setMessage("Video de YouTube cargado como video principal.", "success");
+                    queueItem.status = "ready";
+                    queueItem.progress = 0;
+                    queueItem.step = "Pendiente";
+                    queueItem.filepath = job.filepath;
+                    queueItem.filename = job.filename;
+                    queueItem.title = job.title || title || queueItem.title;
+                    document.getElementById("titleInput").value = queueItem.title;
+                    setYoutubeStatus("Video importado y agregado a la cola.", "success");
+                    setMessage("Video de YouTube listo en la cola.", "success");
                     updateProgress(0, "Video listo para procesar");
+                    renderQueue();
+                    return;
                 }
 
                 if (job.status === "error") {
-                    clearInterval(importPollTimer);
                     throw new Error(job.error || "Error importando desde YouTube");
                 }
+
+                setTimeout(() => fetchYoutubeImportStatus(queueId, jobId, title), 1200);
             } catch (error) {
-                clearInterval(importPollTimer);
+                queueItem.status = "error";
+                queueItem.error = error.message;
+                renderQueue();
                 setYoutubeStatus(error.message, "error");
             }
         }
 
         async function processVideo() {
-            if (!uploaded.video) {
-                setMessage("Primero sube el video principal.", "error");
+            const pending = videoQueue.filter((item) => item.status === "ready" && item.filepath);
+            if (!pending.length) {
+                setMessage("No hay videos pendientes en la cola.", "error");
                 return;
             }
 
+            processingQueue = true;
             document.getElementById("processBtn").disabled = true;
             document.getElementById("downloadBtn").disabled = true;
-            currentOutput = null;
-            updateProgress(0, "Enviando render");
-            setMessage("Procesamiento iniciado. Puedes ver el avance abajo.", "success");
+            renderQueue();
+            setMessage(`Procesando ${pending.length} videos en cola.`, "success");
+
+            for (const item of pending) {
+                await processQueueItem(item);
+            }
+
+            processingQueue = false;
+            activeQueueItemId = null;
+            currentJob = null;
+            renderQueue();
+            setMessage("Cola procesada. Puedes descargar los videos listos.", "success");
+        }
+
+        async function processQueueItem(item) {
+            item.status = "processing";
+            item.progress = 0;
+            item.step = "Enviando render";
+            item.error = "";
+            activeQueueItemId = item.id;
+            updateProgress(0, `Procesando: ${item.title}`);
+            renderQueue();
 
             const payload = {
-                input_video: uploaded.video.filepath,
+                input_video: item.filepath,
                 logo_path: uploaded.logo ? uploaded.logo.filepath : null,
                 follow_image_path: uploaded.follow ? uploaded.follow.filepath : null,
                 ending_path: uploaded.ending ? uploaded.ending.filepath : null,
-                title_text: document.getElementById("titleInput").value || "Mi Video",
+                title_text: item.title || document.getElementById("titleInput").value || "Mi Video",
                 speed: Number(document.getElementById("speedInput").value),
                 zoom_bottom: Number(document.getElementById("zoomBottomInput").value) / 100,
                 zoom_top: Number(document.getElementById("zoomTopInput").value) / 100,
@@ -1014,46 +1238,41 @@
                 if (!response.ok || !data.success) throw new Error(data.error || "No se pudo iniciar el render");
                 currentJob = data.job_id;
                 currentOutput = data.output_filename;
-                startPolling();
+                await pollProcessJob(item, data.job_id);
             } catch (error) {
-                document.getElementById("processBtn").disabled = false;
-                setMessage(error.message, "error");
+                item.status = "error";
+                item.error = error.message;
+                renderQueue();
             }
         }
 
-        function startPolling() {
-            clearInterval(pollTimer);
-            pollTimer = setInterval(fetchJobStatus, 1200);
-            fetchJobStatus();
-        }
-
-        async function fetchJobStatus() {
-            if (!currentJob) return;
-
-            try {
-                const response = await fetch(`${API_BASE}/jobs/${currentJob}`);
+        async function pollProcessJob(item, jobId) {
+            while (true) {
+                const response = await fetch(`${API_BASE}/jobs/${jobId}`);
                 const job = await response.json();
                 if (!response.ok) throw new Error(job.error || "No se pudo leer el estado");
 
-                updateProgress(job.progress || 0, job.step || job.status);
+                item.progress = job.progress || 0;
+                item.step = job.step || job.status || "Procesando";
+                updateProgress(item.progress, `${item.step}: ${item.title}`);
+                renderQueue();
 
                 if (job.status === "completed") {
-                    clearInterval(pollTimer);
-                    document.getElementById("processBtn").disabled = false;
-                    document.getElementById("downloadBtn").disabled = false;
-                    renderPreview(job.output_filename || currentOutput);
-                    setMessage("Video listo para revisar y descargar.", "success");
+                    item.status = "completed";
+                    item.progress = 100;
+                    item.step = "Listo";
+                    item.outputFilename = job.output_filename || currentOutput;
+                    currentOutput = item.outputFilename;
+                    renderPreview(item.outputFilename);
+                    renderQueue();
+                    return;
                 }
 
                 if (job.status === "error") {
-                    clearInterval(pollTimer);
-                    document.getElementById("processBtn").disabled = false;
-                    setMessage(job.error || "Error durante el render.", "error");
+                    throw new Error(job.error || "Error durante el render.");
                 }
-            } catch (error) {
-                clearInterval(pollTimer);
-                document.getElementById("processBtn").disabled = false;
-                setMessage(error.message, "error");
+
+                await sleep(1200);
             }
         }
 
@@ -1073,8 +1292,35 @@
         }
 
         function downloadVideo() {
-            if (!currentOutput) return;
-            window.location.href = `${API_BASE}/download/${encodeURIComponent(currentOutput)}`;
+            const filenames = videoQueue
+                .filter((item) => item.outputFilename)
+                .map((item) => item.outputFilename);
+            if (!filenames.length) return;
+
+            fetch(`${API_BASE}/download-bundle`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ filenames })
+            })
+                .then((response) => {
+                    if (!response.ok) throw new Error("No pude preparar la descarga.");
+                    return response.blob();
+                })
+                .then((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = "workfast_videos.zip";
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    URL.revokeObjectURL(url);
+                })
+                .catch((error) => setMessage(error.message, "error"));
+        }
+
+        function sleep(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
         }
 
         function setMessage(message, type = "") {
@@ -1125,6 +1371,7 @@
             .then((response) => {
                 if (!response.ok) throw new Error();
                 document.getElementById("serverDot").classList.add("ok");
+                renderQueue();
                 loadAssetLibrary();
                 loadYoutubeCookiesStatus();
             })

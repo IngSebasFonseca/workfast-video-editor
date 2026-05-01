@@ -3,11 +3,13 @@ from __future__ import annotations
 import threading
 import uuid
 import base64
+import io
 import json
 import os
 import re
 import socket
 import subprocess
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -805,6 +807,33 @@ def download_file(filename: str):
     if not filepath.exists():
         return jsonify({"error": "Archivo no encontrado."}), 404
     return send_file(filepath, as_attachment=True, download_name=filepath.name)
+
+
+@app.post("/api/download-bundle")
+def download_bundle():
+    data = request.get_json(silent=True) or {}
+    filenames = data.get("filenames") or []
+    safe_files = []
+    for filename in filenames[:5]:
+        filepath = OUTPUT_FOLDER / secure_filename(str(filename))
+        if filepath.exists() and filepath.is_file():
+            safe_files.append(filepath)
+
+    if not safe_files:
+        return jsonify({"error": "No hay videos listos para descargar."}), 400
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for filepath in safe_files:
+            archive.write(filepath, arcname=filepath.name)
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"workfast_videos_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.zip",
+        mimetype="application/zip",
+    )
 
 
 if __name__ == "__main__":
