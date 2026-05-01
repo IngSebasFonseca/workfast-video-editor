@@ -133,17 +133,17 @@
         .asset-preview-card {
             margin-top: 10px;
             display: grid;
-            grid-template-columns: 74px minmax(0, 1fr);
-            gap: 10px;
+            grid-template-columns: 92px minmax(0, 1fr);
+            gap: 12px;
             align-items: center;
-            padding: 10px;
+            padding: 12px;
             border-radius: 8px;
             border: 1px solid #22563d;
-            background: #13261d;
+            background: linear-gradient(180deg, #173323, #111f18);
         }
 
         .asset-preview-media {
-            width: 74px;
+            width: 92px;
             aspect-ratio: 1;
             border-radius: 7px;
             background: #090b0e;
@@ -207,16 +207,16 @@
 
         .youtube-item {
             display: grid;
-            grid-template-columns: 72px minmax(0, 1fr);
-            gap: 10px;
-            padding: 10px;
+            grid-template-columns: 92px minmax(0, 1fr);
+            gap: 12px;
+            padding: 12px;
             border: 1px solid var(--line);
             border-radius: 8px;
             background: var(--panel-2);
         }
 
         .youtube-thumb {
-            width: 72px;
+            width: 92px;
             aspect-ratio: 16 / 9;
             object-fit: cover;
             border-radius: 6px;
@@ -456,13 +456,33 @@
 
         .queue-item {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 8px;
+            grid-template-columns: 76px minmax(0, 1fr) auto;
+            gap: 10px;
             align-items: center;
             padding: 10px;
             border: 1px solid var(--line);
             border-radius: 8px;
             background: #111419;
+        }
+
+        .queue-thumb {
+            width: 76px;
+            aspect-ratio: 9 / 16;
+            border-radius: 7px;
+            object-fit: cover;
+            background: linear-gradient(180deg, #2a3039, #0b0d10);
+            display: grid;
+            place-items: center;
+            color: var(--green);
+            font-size: 22px;
+            font-weight: 900;
+        }
+
+        .queue-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: inherit;
         }
 
         .queue-title {
@@ -581,7 +601,7 @@
             <div class="section">
                 <h2>Recursos</h2>
                 <div class="dropzone" data-type="logo">
-                    <div><strong>Logo</strong>PNG/JPG con transparencia si tienes</div>
+                    <div><strong>Cambiar logo</strong>Marca de agua de tus videos</div>
                 </div>
                 <input class="hidden" id="logoInput" type="file" accept="image/*">
                 <select class="asset-select" id="logoSelect"></select>
@@ -589,7 +609,7 @@
 
                 <div style="height: 12px"></div>
                 <div class="dropzone" data-type="follow">
-                    <div><strong>Imagen sigueme</strong>PNG/JPG</div>
+                    <div><strong>Cambiar sigueme</strong>Imagen que aparece por intervalos</div>
                 </div>
                 <input class="hidden" id="followInput" type="file" accept="image/*">
                 <select class="asset-select" id="followSelect"></select>
@@ -597,7 +617,7 @@
 
                 <div style="height: 12px"></div>
                 <div class="dropzone" data-type="ending">
-                    <div><strong>Ending</strong>Video corto final</div>
+                    <div><strong>Cambiar cierre</strong>Video final automatico</div>
                 </div>
                 <input class="hidden" id="endingInput" type="file" accept="video/*">
                 <select class="asset-select" id="endingSelect"></select>
@@ -898,7 +918,8 @@
                 step: item.step || "Pendiente",
                 outputFilename: "",
                 error: "",
-                youtubeKey: item.youtubeKey || ""
+                youtubeKey: item.youtubeKey || "",
+                thumbnail: item.thumbnail || ""
             };
             videoQueue.push(queueItem);
             if (videoQueue.length === 1) {
@@ -923,6 +944,7 @@
             } else {
                 list.innerHTML = videoQueue.map((item) => `
                     <div class="queue-item" data-queue-id="${escapeHtml(item.id)}">
+                        <div class="queue-thumb">${item.thumbnail ? `<img src="${escapeHtml(item.thumbnail)}" alt="">` : escapeHtml((item.title || "V").slice(0, 1).toUpperCase())}</div>
                         <div>
                             <input class="queue-title" data-title-id="${escapeHtml(item.id)}" value="${escapeHtml(item.title)}" ${item.status === "processing" ? "disabled" : ""}>
                             <div class="queue-meta">${escapeHtml(statusLabel(item))} · ${escapeHtml(item.source)}${item.progress ? ` · ${item.progress}%` : ""}</div>
@@ -1151,7 +1173,8 @@
                 source: "YouTube",
                 status: "importing",
                 step: "En cola para importar",
-                youtubeKey: key
+                youtubeKey: key,
+                thumbnail: video.thumbnail || ""
             });
             if (!queueItem) return;
 

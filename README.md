@@ -5,6 +5,7 @@ App local para automatizar un preset de edicion estilo CapCut/Filmora para video
 ## Que hace
 
 - Exporta en formato vertical 9:16, 1080x1920.
+- Usa NVIDIA NVENC automaticamente si FFmpeg detecta una GPU compatible.
 - Duplica el video en dos capas.
 - Capa inferior: espejo horizontal, zoom 196%, saturacion alta y desvanecimiento suave.
 - Capa superior: zoom 96%, filtro HD ligero y enfoque.
@@ -13,9 +14,10 @@ App local para automatizar un preset de edicion estilo CapCut/Filmora para video
 - Logo con movimiento de izquierda a derecha durante todo el video.
 - Titulo centrado con fondo negro y texto verde cada 10 segundos.
 - Imagen "sigueme" en intervalos.
-- Badge tipo sticker "LIKE".
 - Ending opcional al final.
 - Barra de progreso real por job.
+- Cola de hasta 5 videos con descarga individual o ZIP.
+- Los videos exportados usan el titulo como nombre de archivo.
 - Importacion desde YouTube: pega un canal, playlist o video, elige uno e importalo como video principal.
 - Sesion de YouTube desde Edge, Chrome, Firefox o Brave cuando YouTube pide confirmar que no eres bot.
 - Audio HD: denoise, EQ de voz, compresion, loudness y AAC 256 kbps.
@@ -56,7 +58,7 @@ http://localhost:5000
 2. O pega un link de YouTube, pulsa `Cargar` e importa el video que quieras.
 3. Usa los recursos predeterminados o sube nuevos logo, sigueme y ending.
 4. El titulo se llena con el nombre del video importado/subido y puedes editarlo.
-5. Pulsa `Procesar video`.
+5. Pulsa `Procesar cola`.
 6. Revisa la barra de progreso.
 7. Descarga el resultado cuando termine.
 

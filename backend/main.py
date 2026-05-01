@@ -77,6 +77,15 @@ def title_from_filename(filename: str) -> str:
     return stem.replace("_", " ").replace("-", " ").strip() or "Mi Video"
 
 
+def output_name_from_title(title: str, fallback: str = "video") -> str:
+    clean = re.sub(r"[^\w\s.-]", " ", title or "", flags=re.UNICODE)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    filename = secure_filename(clean)[:90].strip("._-")
+    if not filename:
+        filename = secure_filename(fallback)[:90].strip("._-") or "video"
+    return filename
+
+
 def asset_dir(asset_type: str) -> Path:
     safe_type = secure_filename(asset_type)
     if safe_type not in ASSET_TYPES:
@@ -734,7 +743,9 @@ def process_video():
     if not input_video.exists():
         return jsonify({"error": "No encontre el video de entrada."}), 400
 
-    output_filename = f"edited_{uuid.uuid4().hex[:10]}_{secure_filename(input_video.name)}"
+    title_text = data.get("title_text") or title_from_filename(input_video.name)
+    output_base = output_name_from_title(title_text, input_video.stem)
+    output_filename = f"{output_base}_{uuid.uuid4().hex[:6]}.mp4"
     output_path = OUTPUT_FOLDER / output_filename
     job_id = uuid.uuid4().hex
 
@@ -762,7 +773,7 @@ def process_video():
                 progress_callback=progress_callback,
             )
             editor.process_complete(
-                title_text=data.get("title_text") or "Mi Video",
+                title_text=title_text,
                 speed=float(data.get("speed", 1.05)),
                 zoom_bottom=float(data.get("zoom_bottom", 1.96)),
                 zoom_top=float(data.get("zoom_top", 0.96)),

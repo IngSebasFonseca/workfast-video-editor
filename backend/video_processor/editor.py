@@ -168,12 +168,7 @@ class VideoEditor:
             "[vout]",
             "-map",
             "[aout]",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "faster",
-            "-crf",
-            "20",
+            *self._video_encoder_args(),
             "-pix_fmt",
             "yuv420p",
             "-c:a",
@@ -342,12 +337,7 @@ class VideoEditor:
             ),
             "-af",
             "aresample=48000",
-            "-c:v",
-            "libx264",
-                "-preset",
-                "faster",
-                "-crf",
-                "20",
+            *self._video_encoder_args(),
             "-c:a",
             "aac",
             "-b:a",
@@ -440,6 +430,44 @@ class VideoEditor:
         for tool in ("ffmpeg", "ffprobe"):
             if shutil.which(tool) is None:
                 raise RuntimeError(f"{tool} no esta instalado o no esta en el PATH.")
+
+    @classmethod
+    def _video_encoder_args(cls) -> list[str]:
+        if cls._has_encoder("h264_nvenc"):
+            return [
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                "p4",
+                "-tune",
+                "hq",
+                "-rc",
+                "vbr",
+                "-cq",
+                "21",
+                "-b:v",
+                "0",
+                "-spatial-aq",
+                "1",
+                "-temporal-aq",
+                "1",
+            ]
+        return ["-c:v", "libx264", "-preset", "faster", "-crf", "20"]
+
+    @staticmethod
+    def _has_encoder(name: str) -> bool:
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+            )
+            return result.returncode == 0 and name in result.stdout
+        except Exception:
+            return False
 
     def _progress(self, percent: int, step: str) -> None:
         if self.progress_callback:
