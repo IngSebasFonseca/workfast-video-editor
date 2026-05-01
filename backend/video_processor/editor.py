@@ -228,10 +228,9 @@ class VideoEditor:
                 "boxblur=10:1,format=rgba,colorchannelmixer=aa=0.78[bottom]"
             ),
             (
-                f"[top_src]scale={self.WIDTH}:{self.HEIGHT}:force_original_aspect_ratio=decrease,"
-                f"pad={self.WIDTH}:{self.HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-                f"scale={top_scale_w}:{top_scale_h}:flags=lanczos,"
-                f"pad={self.WIDTH}:{self.HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+                f"[top_src]scale={top_scale_w}:{top_scale_h}:"
+                "force_original_aspect_ratio=increase,"
+                f"crop={top_scale_w}:{top_scale_h},"
                 f"eq=contrast={contrast:.2f}:saturation=1.08:brightness=0.01,"
                 f"unsharp=5:5:{sharpen:.2f}:3:3:0.20,format=rgba[top]"
             ),
@@ -250,7 +249,7 @@ class VideoEditor:
             stage_count += 1
             parts.append(
                 f"[{stage}][logo]overlay="
-                f"x='(W-w)*t/{output_duration:.3f}':y=72:"
+                f"x='(W-w)*t/{output_duration:.3f}':y=(H-h)/2:"
                 f"format=auto:eof_action=repeat:repeatlast=1[{next_stage}]"
             )
             stage = next_stage
@@ -273,8 +272,8 @@ class VideoEditor:
         next_stage = f"stage{stage_count}"
         parts.append(
             f"[{stage}]drawtext=text='{title}':"
-            "fontcolor=0x39FF14:fontsize=64:font='Arial':box=1:"
-            "boxcolor=black@0.86:boxborderw=24:x=(w-text_w)/2:y=(h-text_h)/2:"
+            "fontcolor=0x39FF14:fontsize=54:font='Arial Bold':box=1:"
+            "boxcolor=black@0.92:boxborderw=24:x=(w-text_w)/2:y=64:"
             f"enable='lt(mod(t\\,{interval})\\,3)'[{next_stage}]"
         )
         stage = next_stage
