@@ -16,6 +16,8 @@ App local para automatizar un preset de edicion estilo CapCut/Filmora para video
 - Badge tipo sticker "LIKE".
 - Ending opcional al final.
 - Barra de progreso real por job.
+- Importacion desde YouTube: pega un canal, playlist o video, elige uno e importalo como video principal.
+- Audio HD: denoise, EQ de voz, compresion, loudness y AAC 256 kbps.
 
 ## Requisitos
 
@@ -48,11 +50,14 @@ http://localhost:5000
 ## Uso
 
 1. Sube el video principal.
-2. Sube logo, imagen de sigueme y ending si los tienes.
-3. Ajusta titulo y parametros si quieres.
-4. Pulsa `Procesar video`.
-5. Revisa la barra de progreso.
-6. Descarga el resultado cuando termine.
+2. O pega un link de YouTube, pulsa `Cargar` e importa el video que quieras.
+3. Sube logo, imagen de sigueme y ending si los tienes.
+4. Ajusta titulo y parametros si quieres.
+5. Pulsa `Procesar video`.
+6. Revisa la barra de progreso.
+7. Descarga el resultado cuando termine.
+
+Usa la importacion de YouTube solo con contenido propio, con permiso o con derechos de uso para tus redes.
 
 Los videos subidos y generados se guardan localmente en:
 

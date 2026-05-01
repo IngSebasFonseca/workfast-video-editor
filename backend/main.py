@@ -4,10 +4,12 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
+from yt_dlp import YoutubeDL
 
 from video_processor import VideoEditor
 
@@ -38,6 +40,35 @@ def set_job(job_id: str, **updates) -> None:
     with jobs_lock:
         jobs.setdefault(job_id, {}).update(updates)
         jobs[job_id]["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+
+def is_supported_video_url(url: str) -> bool:
+    parsed = urlparse(url or "")
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def normalize_youtube_entry(entry: dict) -> dict:
+    if not isinstance(entry, dict):
+        entry = {"url": str(entry), "title": str(entry)}
+
+    video_id = entry.get("id") or ""
+    webpage_url = entry.get("webpage_url") or entry.get("url") or ""
+    if video_id and not webpage_url.startswith("http"):
+        webpage_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    thumbnails = entry.get("thumbnails") or []
+    thumbnail = entry.get("thumbnail") or ""
+    if thumbnails and not thumbnail:
+        thumbnail = thumbnails[-1].get("url") or ""
+
+    return {
+        "id": video_id,
+        "title": entry.get("title") or "Video sin titulo",
+        "url": webpage_url,
+        "duration": entry.get("duration"),
+        "channel": entry.get("channel") or entry.get("uploader") or "",
+        "thumbnail": thumbnail,
+    }
 
 
 @app.get("/")
@@ -79,6 +110,115 @@ def upload_file():
             "type": file_type,
         }
     )
+
+
+@app.post("/api/youtube/list")
+def list_youtube_videos():
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+
+    if not is_supported_video_url(url):
+        return jsonify({"error": "Pega una URL valida de YouTube, canal o playlist."}), 400
+
+    try:
+        with YoutubeDL(
+            {
+                "extract_flat": "in_playlist",
+                "quiet": True,
+                "no_warnings": True,
+                "ignoreerrors": True,
+            }
+        ) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        if not info:
+            return jsonify({"error": "YouTube no devolvio informacion para ese link."}), 404
+
+        entries = info.get("entries") if isinstance(info, dict) else None
+        if entries:
+            videos = [normalize_youtube_entry(entry) for entry in entries if entry]
+        else:
+            videos = [normalize_youtube_entry(info)]
+
+        videos = [video for video in videos if video.get("url")]
+        return jsonify({"success": True, "videos": videos, "count": len(videos)})
+    except Exception as exc:
+        return jsonify({"error": f"No pude leer esa pagina de YouTube: {exc}"}), 500
+
+
+@app.post("/api/youtube/import")
+def import_youtube_video():
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+
+    if not is_supported_video_url(url):
+        return jsonify({"error": "URL de video no valida."}), 400
+
+    job_id = uuid.uuid4().hex
+    set_job(job_id, status="queued", progress=0, step="En cola para importar")
+
+    def download_hook(payload: dict) -> None:
+        status = payload.get("status")
+        if status == "downloading":
+            total = payload.get("total_bytes") or payload.get("total_bytes_estimate") or 0
+            downloaded = payload.get("downloaded_bytes") or 0
+            progress = 5
+            if total:
+                progress = 5 + int((downloaded / total) * 85)
+            set_job(job_id, status="processing", progress=min(progress, 90), step="Descargando video")
+        elif status == "finished":
+            set_job(job_id, status="processing", progress=92, step="Preparando archivo")
+
+    def worker() -> None:
+        try:
+            set_job(job_id, status="processing", progress=1, step="Conectando con YouTube")
+            output_template = str(UPLOAD_FOLDER / f"youtube_{job_id}_%(title).80s.%(ext)s")
+            with YoutubeDL(
+                {
+                    "format": "bv*[height<=1080]+ba/b[height<=1080]/best",
+                    "merge_output_format": "mp4",
+                    "outtmpl": output_template,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noplaylist": True,
+                    "progress_hooks": [download_hook],
+                    "postprocessor_args": {"ffmpeg": ["-movflags", "+faststart"]},
+                }
+            ) as ydl:
+                info = ydl.extract_info(url, download=True)
+                downloaded = Path(ydl.prepare_filename(info))
+                if downloaded.suffix.lower() != ".mp4":
+                    downloaded = downloaded.with_suffix(".mp4")
+
+            if not downloaded.exists():
+                candidates = sorted(
+                    UPLOAD_FOLDER.glob(f"youtube_{job_id}_*"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+                if not candidates:
+                    raise RuntimeError("No encontre el archivo descargado.")
+                downloaded = candidates[0]
+
+            safe_name = f"video_{job_id}_{secure_filename(downloaded.name)}"
+            final_path = UPLOAD_FOLDER / safe_name
+            if downloaded != final_path:
+                downloaded.replace(final_path)
+
+            set_job(
+                job_id,
+                status="completed",
+                progress=100,
+                step="Video importado",
+                filename=safe_name,
+                filepath=str(final_path),
+                type="video",
+            )
+        except Exception as exc:
+            set_job(job_id, status="error", progress=0, step="Error", error=str(exc))
+
+    threading.Thread(target=worker, daemon=True).start()
+    return jsonify({"success": True, "job_id": job_id})
 
 
 @app.post("/api/process")

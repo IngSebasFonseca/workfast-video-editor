@@ -176,7 +176,7 @@ class VideoEditor:
             "-c:a",
             "aac",
             "-b:a",
-            "192k",
+            "256k",
             "-movflags",
             "+faststart",
             "-shortest",
@@ -285,10 +285,14 @@ class VideoEditor:
         )
         parts.append(f"[video_speed]setpts=PTS/{speed:.5f},setsar=1[vout]")
         parts.append(
-            f"[{audio_index}:a]atempo={speed:.5f},volume={volume_db:.2f}dB,"
-            "afftdn=nf=-25,highpass=f=80,lowpass=f=15000,"
-            "acompressor=threshold=-18dB:ratio=2.5:attack=20:release=250,"
-            "alimiter=limit=0.97[aout]"
+            f"[{audio_index}:a]aresample=48000,atempo={speed:.5f},volume={volume_db:.2f}dB,"
+            "afftdn=nf=-28,highpass=f=75,lowpass=f=16000,"
+            "equalizer=f=120:t=q:w=0.8:g=1.5,"
+            "equalizer=f=3200:t=q:w=1.1:g=2.4,"
+            "equalizer=f=8500:t=q:w=1.4:g=1.2,"
+            "acompressor=threshold=-18dB:ratio=2.2:attack=12:release=180:makeup=1.5,"
+            "loudnorm=I=-14:TP=-1.5:LRA=10,"
+            "alimiter=limit=0.96[aout]"
         )
 
         return ";".join(parts)
@@ -343,7 +347,7 @@ class VideoEditor:
             "-c:a",
             "aac",
             "-b:a",
-            "192k",
+            "256k",
             "-shortest",
             str(normalized_ending),
             ]

@@ -1,3 +1,4 @@
 Flask>=3.0,<4
 Flask-Cors>=4.0,<5
 Werkzeug>=3.0,<4
+yt-dlp>=2025.1.15

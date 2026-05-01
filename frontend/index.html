@@ -121,6 +121,62 @@
             font-size: 13px;
         }
 
+        .youtube-tools {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 92px;
+            gap: 8px;
+        }
+
+        .youtube-list {
+            display: grid;
+            gap: 10px;
+            max-height: 340px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        .youtube-item {
+            display: grid;
+            grid-template-columns: 72px minmax(0, 1fr);
+            gap: 10px;
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel-2);
+        }
+
+        .youtube-thumb {
+            width: 72px;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+            border-radius: 6px;
+            background: #090b0e;
+        }
+
+        .youtube-title {
+            color: var(--text);
+            font-size: 13px;
+            line-height: 1.25;
+            margin-bottom: 8px;
+        }
+
+        .youtube-meta {
+            color: var(--muted);
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .mini-btn {
+            min-height: 32px;
+            border: 0;
+            border-radius: 7px;
+            background: var(--teal);
+            color: #061210;
+            font-weight: 800;
+            cursor: pointer;
+            padding: 0 10px;
+        }
+
         .stage {
             padding: 18px;
             display: grid;
@@ -307,6 +363,20 @@
             </div>
 
             <div class="section">
+                <h2>YouTube</h2>
+                <div class="field">
+                    <label for="youtubeUrlInput">Canal, playlist o video</label>
+                    <div class="youtube-tools">
+                        <input id="youtubeUrlInput" type="text" placeholder="https://www.youtube.com/@canal/videos">
+                        <button class="mini-btn" id="youtubeLoadBtn">Cargar</button>
+                    </div>
+                </div>
+                <div class="alert" id="youtubeStatus">Usa solo videos propios o con permiso.</div>
+                <div style="height: 10px"></div>
+                <div class="youtube-list" id="youtubeList"></div>
+            </div>
+
+            <div class="section">
                 <h2>Recursos</h2>
                 <div class="dropzone" data-type="logo">
                     <div><strong>Logo</strong>PNG/JPG con transparencia si tienes</div>
@@ -427,6 +497,7 @@
         let currentJob = null;
         let currentOutput = null;
         let pollTimer = null;
+        let importPollTimer = null;
 
         document.querySelectorAll(".dropzone").forEach((zone) => {
             const type = zone.dataset.type;
@@ -453,6 +524,7 @@
 
         document.getElementById("processBtn").addEventListener("click", processVideo);
         document.getElementById("downloadBtn").addEventListener("click", downloadVideo);
+        document.getElementById("youtubeLoadBtn").addEventListener("click", loadYoutubeVideos);
 
         async function uploadFile(type, file) {
             setMessage(`Subiendo ${file.name}...`);
@@ -469,6 +541,112 @@
                 setMessage(`${file.name} cargado correctamente.`, "success");
             } catch (error) {
                 setMessage(error.message, "error");
+            }
+        }
+
+        async function loadYoutubeVideos() {
+            const url = document.getElementById("youtubeUrlInput").value.trim();
+            if (!url) {
+                setYoutubeStatus("Pega primero el link de YouTube.", "error");
+                return;
+            }
+
+            document.getElementById("youtubeLoadBtn").disabled = true;
+            document.getElementById("youtubeList").innerHTML = "";
+            setYoutubeStatus("Leyendo videos de YouTube...");
+
+            try {
+                const response = await fetch(`${API_BASE}/youtube/list`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || "No pude cargar videos");
+
+                renderYoutubeList(data.videos || []);
+                setYoutubeStatus(`${data.count || 0} videos encontrados.`, "success");
+            } catch (error) {
+                setYoutubeStatus(error.message, "error");
+            } finally {
+                document.getElementById("youtubeLoadBtn").disabled = false;
+            }
+        }
+
+        function renderYoutubeList(videos) {
+            const list = document.getElementById("youtubeList");
+            if (!videos.length) {
+                list.innerHTML = `<div class="alert">No encontre videos en ese link.</div>`;
+                return;
+            }
+
+            list.innerHTML = videos.map((video, index) => `
+                <div class="youtube-item">
+                    <img class="youtube-thumb" src="${escapeHtml(video.thumbnail || "")}" alt="">
+                    <div>
+                        <div class="youtube-title">${escapeHtml(video.title)}</div>
+                        <div class="youtube-meta">${formatDuration(video.duration)} ${escapeHtml(video.channel || "")}</div>
+                        <button class="mini-btn" data-youtube-index="${index}">Importar</button>
+                    </div>
+                </div>
+            `).join("");
+
+            list.querySelectorAll("[data-youtube-index]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    importYoutubeVideo(videos[Number(button.dataset.youtubeIndex)]);
+                });
+            });
+        }
+
+        async function importYoutubeVideo(video) {
+            if (!video || !video.url) return;
+            clearInterval(importPollTimer);
+            setYoutubeStatus(`Importando: ${video.title}`);
+
+            try {
+                const response = await fetch(`${API_BASE}/youtube/import`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: video.url })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || "No pude iniciar la importacion");
+                importPollTimer = setInterval(() => fetchYoutubeImportStatus(data.job_id, video.title), 1200);
+                fetchYoutubeImportStatus(data.job_id, video.title);
+            } catch (error) {
+                setYoutubeStatus(error.message, "error");
+            }
+        }
+
+        async function fetchYoutubeImportStatus(jobId, title) {
+            try {
+                const response = await fetch(`${API_BASE}/jobs/${jobId}`);
+                const job = await response.json();
+                if (!response.ok) throw new Error(job.error || "No pude leer la importacion");
+
+                setYoutubeStatus(`${job.step || "Importando"} ${job.progress || 0}%`);
+                updateProgress(job.progress || 0, job.step || "Importando desde YouTube");
+
+                if (job.status === "completed") {
+                    clearInterval(importPollTimer);
+                    uploaded.video = {
+                        filepath: job.filepath,
+                        filename: job.filename,
+                        type: "video"
+                    };
+                    chips.video.innerHTML = `<div class="file-chip">${escapeHtml(title)}<br>Importado desde YouTube</div>`;
+                    setYoutubeStatus("Video importado. Ya puedes procesarlo.", "success");
+                    setMessage("Video de YouTube cargado como video principal.", "success");
+                    updateProgress(0, "Video listo para procesar");
+                }
+
+                if (job.status === "error") {
+                    clearInterval(importPollTimer);
+                    throw new Error(job.error || "Error importando desde YouTube");
+                }
+            } catch (error) {
+                clearInterval(importPollTimer);
+                setYoutubeStatus(error.message, "error");
             }
         }
 
@@ -578,11 +756,34 @@
             box.textContent = message;
         }
 
+        function setYoutubeStatus(message, type = "") {
+            const box = document.getElementById("youtubeStatus");
+            box.className = `alert ${type}`.trim();
+            box.textContent = message;
+        }
+
         function formatSize(bytes) {
             if (!bytes) return "0 B";
             const units = ["B", "KB", "MB", "GB"];
             const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
             return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return "";
+            const value = Number(seconds);
+            const mins = Math.floor(value / 60);
+            const secs = Math.floor(value % 60).toString().padStart(2, "0");
+            return `${mins}:${secs}`;
+        }
+
+        function escapeHtml(value) {
+            return String(value || "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#039;");
         }
 
         fetch(`${API_BASE}/health`)
